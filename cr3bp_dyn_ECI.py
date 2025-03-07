@@ -11,7 +11,6 @@ import scipy as sci
 from scipy import io as sio
 import datetime as dt
 import pymap3d
-import termSat as tS
 import cr3bp_dyn as cr3bp
 
 def termSat(T, Y):
@@ -20,7 +19,7 @@ def termSat(T, Y):
     value = (np.sqrt((Y[0] + mu)**2 + Y[1]**2 + Y[2]**2) < 6371/384400) or (np.sqrt((Y[0] - (1-mu))**2 + Y[1]**2 + Y[2]**2) < Rm) # Stop when the target hits the Earth's or the Moon's surface
     return 1
 
-save_path = "D:\\PythonProjects\\EDP\\PGM\\"
+save_path = "D:\\PythonProjects\\EDP\\PGM_Git\\PAR-PGM\\"
 # Define initial conditions
 mu = 1.2150582e-2
 # x0 = [0.5-mu, 0.0455, 0, -0.5, 0.5, 0.0]' # Sample Starting Point
@@ -66,7 +65,7 @@ for i in range(tspan.shape[0]-1):
 
 # Longer-term scheduling
 tstamp = t[-1] # Begin new trajectory where we left off
-end_t = (40*24)/time2hr
+end_t = (60*24)/time2hr
 tspan = np.arange(tstamp[0], end_t, 8/time2hr) # Schedule to take measurements once every 8 hours
 x0_tmp = np.zeros(dx_dt[-1,:].shape)
 x0_tmp[:] = dx_dt[-1,:]
@@ -315,14 +314,15 @@ for i in range(rot_valid.shape[0]):
 # for which EL < 0 is considered invalid and should be discarded
 t_valid = t_valid.reshape([-1, 1])
 full_ts = np.hstack((t_valid.reshape([-1, 1]), Rho, AZ, EL)) # Full augmented time-series vector
-partial_ts_ECI = np.zeros(full_ts.shape)
-partial_ts_ECI[:,:] = full_ts[:,:] # You start with a copy but work your way down
 
-for i in range(t_valid.shape[0]):
-    if (full_ts[i, 3] < 0):
-        # TODO: Check np.any is working correctly
-        partial_ts_ECI = partial_ts_ECI[~np.any(partial_ts_ECI == np.hstack((t_valid[i], Rho[i], AZ[i], EL[i])), 1), :]
+#for i in range(t_valid.shape[0]):
+#    if (full_ts[i, 3] < 0):
+#        partial_ts_ECI = partial_ts_ECI[~np.any(partial_ts_ECI == np.hstack((t_valid[i], Rho[i], AZ[i], EL[i])), 1), :]
+valid_El = np.where(full_ts[:,3] > 0)[0]
+valid_Az = np.where(np.abs(full_ts[:,2]) < 0.5*np.pi)[0]
+partial_ts_ECI = full_ts[np.intersect1d(valid_El, valid_Az), :]
 
+print()
 # TODO: Need to translate plotting stuff still
 '''
 # Plot the spherical coordinates of the observer parametrically w.r.t. time

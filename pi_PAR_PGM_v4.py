@@ -473,7 +473,7 @@ def plotState(data_cloud, data_truth, dist2km, vel2kms, title, save_path, save_t
     fig.savefig(save_path + save_title + ".png")
     plt.close()
 
-def plotEllipses(data_cloud, data_truth, dist2km, vel2kms, title, save_path, save_title, K, mu_mat, P_mat):
+def plotEllipses(data_cloud, data_truth, dist2km, vel2kms, title, save_path, save_title, K, idx, mu_mat, P_mat):
     colors = ["Red", "royalblue", "Green", "Yellow", "Magenta", "Cyan", "Black", "#500000", "#bf5700", "#00274c"]
     fig, axs = plt.subplots(2, 3)
     fig.suptitle(title);
@@ -485,14 +485,16 @@ def plotEllipses(data_cloud, data_truth, dist2km, vel2kms, title, save_path, sav
     P_marg = P_mat[:, P_marg_idx1, P_marg_idx2]
     
     grid_length = 100
-    X1, X2 = np.meshgrid(np.linspace(np.min(data_cloud[:,plot_dims[0]]), np.max(data_cloud[:,plot_dims[0]]), grid_length),
-                         np.linspace(np.min(data_cloud[:,plot_dims[1]]), np.max(data_cloud[:,plot_dims[1]]), grid_length));
-    X_grid = np.hstack((X1.flatten().reshape([-1,1]), X2.flatten().reshape([-1,1])))
-    
     Z_cell = np.zeros((K, grid_length, grid_length))
     contours_cell = np.zeros((K, 3))
     
     for k in range(K):
+        cluster_data = data_cloud[idx == k, :]
+        if cluster_data.shape[0] == 0:
+            cluster_data = np.full([1, 2], np.nan)
+        X1, X2 = np.meshgrid(np.linspace(np.min(cluster_data[:, 0]), np.max(cluster_data[:, 0]), grid_length),
+                             np.linspace(np.min(cluster_data[:, 1]), np.max(cluster_data[:, 1]), grid_length));
+        X_grid = np.hstack((X1.flatten().reshape([-1,1]), X2.flatten().reshape([-1,1])))
         Z = np.zeros(X_grid.shape[0])
         for i in range(X_grid.shape[0]):
             X_temp = (X_grid[i,:] - mu_marg[k,:]).reshape([1,-1])
@@ -518,14 +520,16 @@ def plotEllipses(data_cloud, data_truth, dist2km, vel2kms, title, save_path, sav
     P_marg = P_mat[:, P_marg_idx1, P_marg_idx2]
     
     grid_length = 100
-    X1, X2 = np.meshgrid(np.linspace(np.min(data_cloud[:,plot_dims[0]]), np.max(data_cloud[:,plot_dims[0]]), grid_length),
-                         np.linspace(np.min(data_cloud[:,plot_dims[1]]), np.max(data_cloud[:,plot_dims[1]]), grid_length));
-    X_grid = np.hstack((X1.flatten().reshape([-1,1]), X2.flatten().reshape([-1,1])))
-    
     Z_cell = np.zeros((K, grid_length, grid_length))
     contours_cell = np.zeros((K, 3))
     
     for k in range(K):
+        cluster_data = data_cloud[idx == k, :]
+        if cluster_data.shape[0] == 0:
+            cluster_data = np.full([1, 2], np.nan)
+        X1, X2 = np.meshgrid(np.linspace(np.min(cluster_data[:, 0]), np.max(cluster_data[:, 0]), grid_length),
+                             np.linspace(np.min(cluster_data[:, 1]), np.max(cluster_data[:, 1]), grid_length));
+        X_grid = np.hstack((X1.flatten().reshape([-1,1]), X2.flatten().reshape([-1,1])))
         Z = np.zeros(X_grid.shape[0])
         for i in range(X_grid.shape[0]):
             X_temp = (X_grid[i,:] - mu_marg[k,:]).reshape([1,-1])
@@ -551,14 +555,16 @@ def plotEllipses(data_cloud, data_truth, dist2km, vel2kms, title, save_path, sav
     P_marg = P_mat[:, P_marg_idx1, P_marg_idx2]
     
     grid_length = 100
-    X1, X2 = np.meshgrid(np.linspace(np.min(data_cloud[:,plot_dims[0]]), np.max(data_cloud[:,plot_dims[0]]), grid_length),
-                         np.linspace(np.min(data_cloud[:,plot_dims[1]]), np.max(data_cloud[:,plot_dims[1]]), grid_length));
-    X_grid = np.hstack((X1.flatten().reshape([-1,1]), X2.flatten().reshape([-1,1])))
-    
     Z_cell = np.zeros((K, grid_length, grid_length))
     contours_cell = np.zeros((K, 3))
     
     for k in range(K):
+        cluster_data = data_cloud[idx == k, :]
+        if cluster_data.shape[0] == 0:
+            cluster_data = np.full([1, 2], np.nan)
+        X1, X2 = np.meshgrid(np.linspace(np.min(cluster_data[:, 0]), np.max(cluster_data[:, 0]), grid_length),
+                             np.linspace(np.min(cluster_data[:, 1]), np.max(cluster_data[:, 1]), grid_length));
+        X_grid = np.hstack((X1.flatten().reshape([-1,1]), X2.flatten().reshape([-1,1])))
         Z = np.zeros(X_grid.shape[0])
         for i in range(X_grid.shape[0]):
             X_temp = (X_grid[i,:] - mu_marg[k,:]).reshape([1,-1])
@@ -585,14 +591,16 @@ def plotEllipses(data_cloud, data_truth, dist2km, vel2kms, title, save_path, sav
     P_marg = P_mat[:, P_marg_idx1, P_marg_idx2]
     
     grid_length = 100
-    X1, X2 = np.meshgrid(np.linspace(np.min(data_cloud[:,plot_dims[0]]), np.max(data_cloud[:,plot_dims[0]]), grid_length),
-                         np.linspace(np.min(data_cloud[:,plot_dims[1]]), np.max(data_cloud[:,plot_dims[1]]), grid_length));
-    X_grid = np.hstack((X1.flatten().reshape([-1,1]), X2.flatten().reshape([-1,1])))
-    
     Z_cell = np.zeros((K, grid_length, grid_length))
     contours_cell = np.zeros((K, 3))
     
     for k in range(K):
+        cluster_data = data_cloud[idx == k, :]
+        if cluster_data.shape[0] == 0:
+            cluster_data = np.full([1, 2], np.nan)
+        X1, X2 = np.meshgrid(np.linspace(np.min(cluster_data[:, 0]), np.max(cluster_data[:, 0]), grid_length),
+                             np.linspace(np.min(cluster_data[:, 1]), np.max(cluster_data[:, 1]), grid_length));
+        X_grid = np.hstack((X1.flatten().reshape([-1,1]), X2.flatten().reshape([-1,1])))
         Z = np.zeros(X_grid.shape[0])
         for i in range(X_grid.shape[0]):
             X_temp = (X_grid[i,:] - mu_marg[k,:]).reshape([1,-1])
@@ -617,14 +625,16 @@ def plotEllipses(data_cloud, data_truth, dist2km, vel2kms, title, save_path, sav
     P_marg = P_mat[:, P_marg_idx1, P_marg_idx2]
     
     grid_length = 100
-    X1, X2 = np.meshgrid(np.linspace(np.min(data_cloud[:,plot_dims[0]]), np.max(data_cloud[:,plot_dims[0]]), grid_length),
-                         np.linspace(np.min(data_cloud[:,plot_dims[1]]), np.max(data_cloud[:,plot_dims[1]]), grid_length));
-    X_grid = np.hstack((X1.flatten().reshape([-1,1]), X2.flatten().reshape([-1,1])))
-    
     Z_cell = np.zeros((K, grid_length, grid_length))
     contours_cell = np.zeros((K, 3))
     
     for k in range(K):
+        cluster_data = data_cloud[idx == k, :]
+        if cluster_data.shape[0] == 0:
+            cluster_data = np.full([1, 2], np.nan)
+        X1, X2 = np.meshgrid(np.linspace(np.min(cluster_data[:, 0]), np.max(cluster_data[:, 0]), grid_length),
+                             np.linspace(np.min(cluster_data[:, 1]), np.max(cluster_data[:, 1]), grid_length));
+        X_grid = np.hstack((X1.flatten().reshape([-1,1]), X2.flatten().reshape([-1,1])))
         Z = np.zeros(X_grid.shape[0])
         for i in range(X_grid.shape[0]):
             X_temp = (X_grid[i,:] - mu_marg[k,:]).reshape([1,-1])
@@ -649,14 +659,16 @@ def plotEllipses(data_cloud, data_truth, dist2km, vel2kms, title, save_path, sav
     P_marg = P_mat[:, P_marg_idx1, P_marg_idx2]
     
     grid_length = 100
-    X1, X2 = np.meshgrid(np.linspace(np.min(data_cloud[:,plot_dims[0]]), np.max(data_cloud[:,plot_dims[0]]), grid_length),
-                         np.linspace(np.min(data_cloud[:,plot_dims[1]]), np.max(data_cloud[:,plot_dims[1]]), grid_length));
-    X_grid = np.hstack((X1.flatten().reshape([-1,1]), X2.flatten().reshape([-1,1])))
-    
     Z_cell = np.zeros((K, grid_length, grid_length))
     contours_cell = np.zeros((K, 3))
     
     for k in range(K):
+        cluster_data = data_cloud[idx == k, :]
+        if cluster_data.shape[0] == 0:
+            cluster_data = np.full([1, 2], np.nan)
+        X1, X2 = np.meshgrid(np.linspace(np.min(cluster_data[:, 0]), np.max(cluster_data[:, 0]), grid_length),
+                             np.linspace(np.min(cluster_data[:, 1]), np.max(cluster_data[:, 1]), grid_length));
+        X_grid = np.hstack((X1.flatten().reshape([-1,1]), X2.flatten().reshape([-1,1])))
         Z = np.zeros(X_grid.shape[0])
         for i in range(X_grid.shape[0]):
             X_temp = (X_grid[i,:] - mu_marg[k,:]).reshape([1,-1])
@@ -710,7 +722,7 @@ if __name__ == '__main__':
     
     # Load noiseless observation data and other important .mat files
     file_path = "D:\\PythonProjects\\EDP\\PGM_Git\\PAR-PGM\\"
-    save_path = "D:\\PythonProjects\\EDP\\PGM\\Test16\\SimFigures\\"
+    save_path = "D:\\PythonProjects\\EDP\\PGM\\Test23\\SimFigures\\"
     if import_msmts_py:
         partial_ts = np.genfromtxt(file_path + "partial_ts.csv", delimiter=',')
         full_ts = np.genfromtxt(file_path + "full_ts.csv", delimiter=',')
@@ -872,7 +884,7 @@ if __name__ == '__main__':
     # Initialize variables
     Kn = 1 # Number of clusters (original)
     K = Kn # Number of clusters (changeable)
-    Kmax = 8 # Maximum number of clusters (Kmax = 1 for EnKF)
+    Kmax = 6 # Maximum number of clusters (Kmax = 1 for EnKF)
     
     mu_c = np.zeros((K, Xm_cloud.shape[1]))
     P_c = np.zeros((K, Xm_cloud.shape[1], Xm_cloud.shape[1]))
@@ -1011,11 +1023,11 @@ if __name__ == '__main__':
     ent2[1] = np.log(la.det(np.cov(Xp_cloud.T)))
     ent1[0,:] = getDiagCov(X0cloud) 
     
-    Xp_cloud_Matlab_file = sio.loadmat(file_path + "Outside\\Xp_cloud_Outside.mat")
-    Xp_cloud_Matlab = np.zeros(Xp_cloud.shape)
-    Xp_cloud_Matlab[:,:] = Xp_cloud_Matlab_file["Xp_cloud"][:,:]
+    #Xp_cloud_Matlab_file = sio.loadmat(file_path + "Outside\\Xp_cloud_Outside.mat")
+    #Xp_cloud_Matlab = np.zeros(Xp_cloud.shape)
+    #Xp_cloud_Matlab[:,:] = Xp_cloud_Matlab_file["Xp_cloud"][:,:]
     Xp_cloudp = np.zeros(Xp_cloud.shape)
-    Xp_cloudp[:,:] = Xp_cloud_Matlab[:, :]
+    Xp_cloudp[:,:] = Xp_cloud[:,:]#Xp_cloud_Matlab[:, :]
     for ts in range(idx_start, idx_end-1):
         to = full_ts[ts,0]
         interval = full_ts[ts+1,0] - full_ts[ts,0]
@@ -1114,9 +1126,9 @@ if __name__ == '__main__':
                 P_mat[:,:,:] = P_c[:,:,:]
         
                 ############## Plotting ###############
-                plotEllipses(Xm_cloud, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(tpr*time2hr,4)) + " Hours (Prior)", save_path, "Timestep_" + str(tau) + "_1A", K, mu_mat, P_mat)
+                plotEllipses(Xm_cloud, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(tpr*time2hr,4)) + " Hours (Prior)", save_path, "Timestep_" + str(tau) + "_1A", K, idx, mu_mat, P_mat)
                 plotState(Xm_cloud, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(time2hr*noised_obs[idx_meas,0][0],4)) + " Hours (Prior)", save_path, "Timestep_" + str(tau) + "_1B", K, idx, True)
-                np.savetxt("D:\\PythonProjects\\EDP\\PGM\\Test16\\cPoints" + str(ts+1) + ".txt", [cPoints[i].shape for i in range(len(cPoints))], delimiter=',', fmt='%f')
+                np.savetxt("D:\\PythonProjects\\EDP\\PGM\\Test23\\cPoints" + str(ts+1) + ".txt", [cPoints[i].shape for i in range(len(cPoints))], delimiter=',', fmt='%f')
                 plotAzEl(Xm_cloud, Xprop_truth, K, h, ts+1, save_path, "Timestep_" + str(tau) + "_1C", idx, plot_cluster=True)
                 ############## Return to Code ##############
         
@@ -1186,7 +1198,7 @@ if __name__ == '__main__':
             P_mat[:,:,:] = P_p[:,:,:]
             
             ############## Plotting ###############
-            plotEllipses(Xm_cloud, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(tpr*time2hr,4)) + " Hours (Post)", save_path, "Timestep_" + str(tau) + "_2A", K, mu_mat, P_mat)
+            plotEllipses(Xp_cloudp, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(tpr*time2hr,4)) + " Hours (Post)", save_path, "Timestep_" + str(tau) + "_2A", K, c_id, mu_mat, P_mat)
             plotState(Xp_cloudp, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(tpr*time2hr,4)) + " Hours (Post)", save_path, "Timestep_" + str(tau) + "_2B", K, c_id, True)
             plotAzEl(Xp_cloudp, Xprop_truth, K, h, ts+1, save_path, "Timestep_" + str(tau) + "_2C", c_id, plot_cluster=True)
             ############## Return to Code ###############
