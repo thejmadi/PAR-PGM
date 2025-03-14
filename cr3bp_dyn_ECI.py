@@ -11,7 +11,6 @@ import scipy as sci
 from scipy import io as sio
 import datetime as dt
 import pymap3d
-import termSat as tS
 import cr3bp_dyn as cr3bp
 
 def termSat(T, Y):
@@ -20,7 +19,7 @@ def termSat(T, Y):
     value = (np.sqrt((Y[0] + mu)**2 + Y[1]**2 + Y[2]**2) < 6371/384400) or (np.sqrt((Y[0] - (1-mu))**2 + Y[1]**2 + Y[2]**2) < Rm) # Stop when the target hits the Earth's or the Moon's surface
     return 1
 
-save_path = "D:\\PythonProjects\\EDP\\PGM\\"
+save_path = "D:\\PythonProjects\\EDP\\PGM_Git\\PAR-PGM\\"
 # Define initial conditions
 mu = 1.2150582e-2
 # x0 = [0.5-mu, 0.0455, 0, -0.5, 0.5, 0.0]' # Sample Starting Point
@@ -44,7 +43,7 @@ vel2kms = dist2km/(time2hr*60*60) # Kms per non-dimensionalized velocity
 # Define time span
 tstamp1 = 0 # For long term trajectories 
 # tstamp = 0.3570
-end_t = 48/time2hr - tstamp1
+end_t = 36/time2hr - tstamp1
 tspan = np.arange(0, end_t, 6.25e-3) # For our modified trajectory 
 
 # Call ode45()
@@ -315,14 +314,16 @@ for i in range(rot_valid.shape[0]):
 # for which EL < 0 is considered invalid and should be discarded
 t_valid = t_valid.reshape([-1, 1])
 full_ts = np.hstack((t_valid.reshape([-1, 1]), Rho, AZ, EL)) # Full augmented time-series vector
-partial_ts_ECI = np.zeros(full_ts.shape)
-partial_ts_ECI[:,:] = full_ts[:,:] # You start with a copy but work your way down
+first_msmt = np.where(full_ts[:,0] > 6)[0][0]
+#for i in range(t_valid.shape[0]):
+#    if (full_ts[i, 3] < 0):
+#        partial_ts_ECI = partial_ts_ECI[~np.any(partial_ts_ECI == np.hstack((t_valid[i], Rho[i], AZ[i], EL[i])), 1), :]
+valid_El = np.where(full_ts[:,3] > 0)[0]
+valid_Az = np.where(np.abs(full_ts[:,2]) < 0.5*np.pi)[0]
+partial_ts_ECI = full_ts[valid_El, :]#[np.intersect1d(valid_El, valid_Az), :]
+#partial_ts_ECI = full_ts[np.intersect1d(valid_El, np.hstack((np.arange(0, first_msmt), valid_Az[np.where(valid_Az <= first_msmt)[0][-1]:]))), :]
 
-for i in range(t_valid.shape[0]):
-    if (full_ts[i, 3] < 0):
-        # TODO: Check np.any is working correctly
-        partial_ts_ECI = partial_ts_ECI[~np.any(partial_ts_ECI == np.hstack((t_valid[i], Rho[i], AZ[i], EL[i])), 1), :]
-
+print()
 # TODO: Need to translate plotting stuff still
 '''
 # Plot the spherical coordinates of the observer parametrically w.r.t. time
