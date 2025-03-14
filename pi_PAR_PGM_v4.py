@@ -17,7 +17,7 @@ import pymap3d
 #import termSat as tS
 import cr3bp_dyn as cr3bp
 import matplotlib.pyplot as plt
-
+from sklearn.cluster import KMeans
 
 
 def termSat(T, Y):
@@ -345,7 +345,10 @@ def getKnEntropy(Kp, Xcloud):
     mu_c = np.zeros((Kp, Xcloud.shape[1]))
     P_c = np.zeros((Kp, Xcloud.shape[1], Xcloud.shape[1]))
     w = np.zeros((Kp, 1))
-    
+    #h = lambda x: np.array([np.arctan2(x[1],x[0]), np.pi/2 - np.arccos(x[2]/np.sqrt(x[0]**2 + x[1]**2 + x[2]**2))]) # Nonlinear measurement model
+    #msmt_cloud = np.zeros((Xcloud.shape[0], 2))
+    #for i in range(Xcloud.shape[0]):
+    #    msmt_cloud[i, :] = h(Xcloud[i, :])
     # Split propagated cloud into position and velocity data before
     # normalization.
     rc = Xcloud[:,:3]
@@ -353,27 +356,38 @@ def getKnEntropy(Kp, Xcloud):
     
     mean_rc = np.mean(rc, 0)
     mean_vc = np.mean(vc, 0)
+    #mean_msmt = np.mean(msmt_cloud, 0)
     
     std_rc = np.std(rc,0, ddof=1)
     std_vc = np.std(vc,0, ddof=1)
+    #std_msmt = np.std(msmt_cloud, 0, ddof=1)
     
     norm_rc = (rc - mean_rc)/la.norm(std_rc) # Normalizing the position 
     norm_vc = (vc - mean_vc)/la.norm(std_vc) # Normalizing the velocity
+    #norm_msmt_az = (msmt_cloud[:, 0] - mean_msmt[0])/la.norm(std_msmt[0])
+    #norm_msmt_el = (msmt_cloud[:, 1] - mean_msmt[1])/la.norm(std_msmt[1])
     
+    #Xm_norm = np.zeros(norm_vc.shape)
+    #Xm_norm[:,:] = norm_vc[:,:]
     Xm_norm = np.hstack((norm_rc, norm_vc))
+    #Xm_norm = np.hstack((norm_rc, norm_vc, norm_msmt_az.reshape([-1, 1]), norm_msmt_el.reshape([-1, 1])))
     
     # Cluster using K-means clustering algorithm
     # TODO: Need whiten before kmeans
-    C, _ = sci.cluster.vq.kmeans(sci.cluster.vq.whiten(Xm_norm), Kp) # Cluster just on position and velocity Normalize the whole thing
-    idx, _ = sci.cluster.vq.vq(sci.cluster.vq.whiten(Xm_norm), C)
+    #C, _ = sci.cluster.vq.kmeans(Xm_norm, Kp) # Cluster just on position and velocity Normalize the whole thing
+    #idx, _ = sci.cluster.vq.vq(Xm_norm, C)
+    kmeans = KMeans(n_clusters=Kp, init="k-means++").fit(Xm_norm)
+    C = kmeans.cluster_centers_
+    idx = kmeans.labels_
     #contourCols = lines(6)
     
     # Convert cluster centers back to non-dimensionalized units
     C_unorm = np.zeros(C.shape)
     C_unorm[:, :] = C[:, :]
     C_unorm[:,:3] = (C[:,:3]*std_rc) + mean_rc # Conversion of position
-    C_unorm[:,3:] = (C[:,3:]*std_vc) + mean_vc # Conversion of velocity
-    
+    C_unorm[:,3:6] = (C[:,3:6]*std_vc) + mean_vc
+    #C_unorm[:,6:7] = (C[:,6:7]*std_msmt[0]) + mean_msmt[0] # Conversion of velocity
+    #C_unorm[:,7:] = (C[:,7:]*std_msmt[1]) + mean_msmt[1]
     cPoints = []#cell(K,1)
     
     # Calculate covariances and weights for each cluster
@@ -722,7 +736,7 @@ if __name__ == '__main__':
     
     # Load noiseless observation data and other important .mat files
     file_path = "D:\\PythonProjects\\EDP\\PGM_Git\\PAR-PGM\\"
-    save_path = "D:\\PythonProjects\\EDP\\PGM\\Test23\\SimFigures\\"
+    save_path = "D:\\PythonProjects\\EDP\\PGM\\Test30\\SimFigures3b\\"
     if import_msmts_py:
         partial_ts = np.genfromtxt(file_path + "partial_ts.csv", delimiter=',')
         full_ts = np.genfromtxt(file_path + "full_ts.csv", delimiter=',')
@@ -890,6 +904,10 @@ if __name__ == '__main__':
     P_c = np.zeros((K, Xm_cloud.shape[1], Xm_cloud.shape[1]))
     wm = np.zeros((K, 1))
     
+    #h = lambda x: np.array([np.arctan2(x[1],x[0]), np.pi/2 - np.arccos(x[2]/np.sqrt(x[0]**2 + x[1]**2 + x[2]**2))]) # Nonlinear measurement model
+    #msmt_cloud = np.zeros((Xm_cloud.shape[0], 2))
+    #for i in range(msmt_cloud.shape[0]):
+    #    msmt_cloud[i, :] = h(Xm_cloud[i, :])
     # Split propagated cloud into position and velocity data before
     # normalization.
     rc = Xm_cloud[:,:3]
@@ -897,24 +915,36 @@ if __name__ == '__main__':
     
     mean_rc = np.mean(rc, 0)
     mean_vc = np.mean(vc, 0)
+    #mean_msmt = np.mean(msmt_cloud, 0)
     
     std_rc = np.std(rc,0, ddof=1)
     std_vc = np.std(vc,0, ddof=1)
+    #std_msmt = np.std(msmt_cloud, 0, ddof=1)
     
     norm_rc = (rc - mean_rc)/la.norm(std_rc) # Normalizing the position 
     norm_vc = (vc - mean_vc)/la.norm(std_vc) # Normalizing the velocity
+    #norm_msmt_az = (msmt_cloud[:, 0] - mean_msmt[0])/la.norm(std_msmt[0])
+    #norm_msmt_el = (msmt_cloud[:, 1] - mean_msmt[1])/la.norm(std_msmt[1])
     
+    #Xm_norm = np.zeros(norm_vc.shape)
+    #Xm_norm[:,:] = norm_vc[:,:]
     Xm_norm = np.hstack((norm_rc, norm_vc))
+    #Xm_norm = np.hstack((norm_rc, norm_vc, norm_msmt_az.reshape([-1, 1]), norm_msmt_el.reshape([-1, 1])))
     
     # Cluster using K-means clustering algorithm
-    C, _ = sci.cluster.vq.kmeans(sci.cluster.vq.whiten(Xm_norm), K) # Cluster just on position and velocity Normalize the whole thing
-    idx, _ = sci.cluster.vq.vq(sci.cluster.vq.whiten(Xm_norm), C)
+    #C, _ = sci.cluster.vq.kmeans(Xm_norm, K) # Cluster just on position and velocity Normalize the whole thing
+    #idx, _ = sci.cluster.vq.vq(Xm_norm, C)
+    kmeans = KMeans(n_clusters=K, init="k-means++").fit(Xm_norm)
+    C = kmeans.cluster_centers_
+    idx = kmeans.labels_
     
     # Convert cluster centers back to non-dimensionalized units
     C_unorm = np.zeros(C.shape)
     C_unorm[:, :] = C[:, :]
     C_unorm[:,:3] = (C[:,:3]*std_rc) + mean_rc # Conversion of position
-    C_unorm[:,3:] = (C[:,3:]*std_vc) + mean_vc # Conversion of velocity
+    C_unorm[:,3:6] = (C[:,3:6]*std_vc) + mean_vc
+    #C_unorm[:,6:7] = (C[:,6:7]*std_msmt[0]) + mean_msmt[0] # Conversion of velocity
+    #C_unorm[:,7:] = (C[:,7:]*std_msmt[1]) + mean_msmt[1] # Conversion of velocity
     
     cPoints = []
     
@@ -1023,12 +1053,13 @@ if __name__ == '__main__':
     ent2[1] = np.log(la.det(np.cov(Xp_cloud.T)))
     ent1[0,:] = getDiagCov(X0cloud) 
     
-    #Xp_cloud_Matlab_file = sio.loadmat(file_path + "Outside\\Xp_cloud_Outside.mat")
-    #Xp_cloud_Matlab = np.zeros(Xp_cloud.shape)
-    #Xp_cloud_Matlab[:,:] = Xp_cloud_Matlab_file["Xp_cloud"][:,:]
+    Xp_cloud_Matlab_file = sio.loadmat("D:\\tarun\\EDP\\PAR_PGM_project\\Mod_IODOD\\Mod_IODOD\\Outside2\\Xp_cloud_Outside.mat")
+    Xp_cloud_Matlab = np.zeros(Xp_cloud.shape)
+    Xp_cloud_Matlab[:,:] = Xp_cloud_Matlab_file["Xp_cloud"][:,:]
     Xp_cloudp = np.zeros(Xp_cloud.shape)
-    Xp_cloudp[:,:] = Xp_cloud[:,:]#Xp_cloud_Matlab[:, :]
+    Xp_cloudp[:,:] = Xp_cloud_Matlab[:, :]
     for ts in range(idx_start, idx_end-1):
+        print(Xp_cloudp.shape[0])
         to = full_ts[ts,0]
         interval = full_ts[ts+1,0] - full_ts[ts,0]
     
@@ -1058,19 +1089,30 @@ if __name__ == '__main__':
             else:
                 K = 1
                 
+            #h = lambda x: np.array([np.arctan2(x[1],x[0]), np.pi/2 - np.arccos(x[2]/np.sqrt(x[0]**2 + x[1]**2 + x[2]**2))]) # Nonlinear measurement model
+            #msmt_cloud = np.zeros((Xm_cloud.shape[0], 2))
+            #for i in range(msmt_cloud.shape[0]):
+            #    msmt_cloud[i, :] = h(Xm_cloud[i, :])
             rc = Xm_cloud[:,:3]
             vc = Xm_cloud[:,3:]
             
             mean_rc = np.mean(rc, 0)
             mean_vc = np.mean(vc, 0)
+            #mean_msmt = np.mean(msmt_cloud, 0)
             
             std_rc = np.std(rc,0, ddof=1)
             std_vc = np.std(vc,0, ddof=1)
+            #std_msmt = np.std(msmt_cloud,0, ddof=1)
             
             norm_rc = (rc - mean_rc)/la.norm(std_rc) # Normalizing the position 
             norm_vc = (vc - mean_vc)/la.norm(std_vc) # Normalizing the velocity
+            #norm_msmt_az = (msmt_cloud[:, 0] - mean_msmt[0])/la.norm(std_msmt[0])
+            #norm_msmt_el = (msmt_cloud[:, 1] - mean_msmt[1])/la.norm(std_msmt[1])
             
+            Xm_norm = np.zeros(norm_vc.shape)
+            Xm_norm[:,:] = norm_vc[:,:]
             Xm_norm = np.hstack((norm_rc, norm_vc))
+            #Xm_norm = np.hstack((norm_rc, norm_vc, norm_msmt_az.reshape([-1, 1]), norm_msmt_el.reshape([-1, 1])))
         
             # Verification Step
             idx_meas = np.where(abs(noised_obs[:,0] - tpr) < 1e-10)[0] # Find row with time
@@ -1078,8 +1120,11 @@ if __name__ == '__main__':
             print("Timestamp: " + str(round(tpr*time2hr,5)))
             
             # Cluster using K-means clustering algorithm
-            temp, _ = sci.cluster.vq.kmeans(sci.cluster.vq.whiten(Xm_norm), K) # Cluster just on position and velocity Normalize the whole thing
-            idx, _ = sci.cluster.vq.vq(sci.cluster.vq.whiten(Xm_norm), temp)
+            #temp, _ = sci.cluster.vq.kmeans(Xm_norm, K) # Cluster just on position and velocity Normalize the whole thing
+            #idx, _ = sci.cluster.vq.vq(Xm_norm, temp)
+            kmeans = KMeans(n_clusters=K, init="k-means++").fit(Xm_norm)
+            temp = kmeans.cluster_centers_
+            idx = kmeans.labels_
     
             mu_c = np.zeros((K, Xm_cloud.shape[1]))
             mu_p = np.zeros((K, Xm_cloud.shape[1]))
@@ -1128,7 +1173,7 @@ if __name__ == '__main__':
                 ############## Plotting ###############
                 plotEllipses(Xm_cloud, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(tpr*time2hr,4)) + " Hours (Prior)", save_path, "Timestep_" + str(tau) + "_1A", K, idx, mu_mat, P_mat)
                 plotState(Xm_cloud, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(time2hr*noised_obs[idx_meas,0][0],4)) + " Hours (Prior)", save_path, "Timestep_" + str(tau) + "_1B", K, idx, True)
-                np.savetxt("D:\\PythonProjects\\EDP\\PGM\\Test23\\cPoints" + str(ts+1) + ".txt", [cPoints[i].shape for i in range(len(cPoints))], delimiter=',', fmt='%f')
+                np.savetxt("D:\\PythonProjects\\EDP\\PGM\\Test30\\cPoints" + str(ts+1) + ".txt", [cPoints[i].shape for i in range(len(cPoints))], delimiter=',', fmt='%f')
                 plotAzEl(Xm_cloud, Xprop_truth, K, h, ts+1, save_path, "Timestep_" + str(tau) + "_1C", idx, plot_cluster=True)
                 ############## Return to Code ##############
         
@@ -1211,7 +1256,7 @@ if __name__ == '__main__':
             ent2[tau+2] = np.log(wsum)
         else:
             if tpr >= cVal:
-                Ke = 8 # Clusters used for calculating entropy
+                Ke = 6 # Clusters used for calculating entropy
             else:
                 Ke = 1 # Clusters used for calculating entropy
             

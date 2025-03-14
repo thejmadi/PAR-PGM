@@ -43,7 +43,7 @@ vel2kms = dist2km/(time2hr*60*60) # Kms per non-dimensionalized velocity
 # Define time span
 tstamp1 = 0 # For long term trajectories 
 # tstamp = 0.3570
-end_t = 48/time2hr - tstamp1
+end_t = 36/time2hr - tstamp1
 tspan = np.arange(0, end_t, 6.25e-3) # For our modified trajectory 
 
 # Call ode45()
@@ -65,7 +65,7 @@ for i in range(tspan.shape[0]-1):
 
 # Longer-term scheduling
 tstamp = t[-1] # Begin new trajectory where we left off
-end_t = (60*24)/time2hr
+end_t = (40*24)/time2hr
 tspan = np.arange(tstamp[0], end_t, 8/time2hr) # Schedule to take measurements once every 8 hours
 x0_tmp = np.zeros(dx_dt[-1,:].shape)
 x0_tmp[:] = dx_dt[-1,:]
@@ -314,13 +314,14 @@ for i in range(rot_valid.shape[0]):
 # for which EL < 0 is considered invalid and should be discarded
 t_valid = t_valid.reshape([-1, 1])
 full_ts = np.hstack((t_valid.reshape([-1, 1]), Rho, AZ, EL)) # Full augmented time-series vector
-
+first_msmt = np.where(full_ts[:,0] > 6)[0][0]
 #for i in range(t_valid.shape[0]):
 #    if (full_ts[i, 3] < 0):
 #        partial_ts_ECI = partial_ts_ECI[~np.any(partial_ts_ECI == np.hstack((t_valid[i], Rho[i], AZ[i], EL[i])), 1), :]
 valid_El = np.where(full_ts[:,3] > 0)[0]
 valid_Az = np.where(np.abs(full_ts[:,2]) < 0.5*np.pi)[0]
-partial_ts_ECI = full_ts[np.intersect1d(valid_El, valid_Az), :]
+partial_ts_ECI = full_ts[valid_El, :]#[np.intersect1d(valid_El, valid_Az), :]
+#partial_ts_ECI = full_ts[np.intersect1d(valid_El, np.hstack((np.arange(0, first_msmt), valid_Az[np.where(valid_Az <= first_msmt)[0][-1]:]))), :]
 
 print()
 # TODO: Need to translate plotting stuff still
