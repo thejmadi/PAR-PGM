@@ -26,7 +26,7 @@ def termSat(T, Y):
     value = (np.sqrt((Y[0] + mu)**2 + Y[1]**2 + Y[2]**2) < 6371/384400) or (np.sqrt((Y[0] - (1-mu))**2 + Y[1]**2 + Y[2]**2) < Rm) # Stop when the target hits the Earth's or the Moon's surface
     return 1
 
-def stateEstCloud(pf, obTr, tdiff, file_path):
+def stateEstCloud(pf, obTr, tdiff, file_path, file_id):
     noised_obs = obTr
 
     R_t = np.zeros(3*noised_obs.shape[0]) # We shall diagonalize this later
@@ -41,6 +41,8 @@ def stateEstCloud(pf, obTr, tdiff, file_path):
 
     R_t = np.diag(R_t)
     data_vec = np.random.multivariate_normal(mu_t, R_t).reshape([-1,1])
+    #stateEstCloud_file = sio.loadmat(file_path + "sEC\\stateEstCloud_"+str(file_id)+".mat")
+    #data_vec = stateEstCloud_file['data_vec']
 
     for i in range(noised_obs.shape[0]):
         noised_obs[i,1:4] = data_vec[3*i:3*i+3,0]
@@ -233,9 +235,11 @@ def convertToTopo(X_bt, t_stamp):
     X_ot = np.hstack([rot_topo, vot_topo])
     return X_ot
 
-def getNoisyMeas(Xtruth, R, h):
+def getNoisyMeas(Xtruth, R, h, file_id=None):
     mzkm = h(Xtruth)
     zk = np.random.multivariate_normal(mzkm, R)
+    #zk_file = sio.loadmat(file_path + "NoisyMeas\\zk_" + str(file_id) + ".mat")
+    #zk = zk_file['zk']
     zk = zk.reshape([-1,1]) # Make into column vector        
     return zk
 
@@ -273,7 +277,7 @@ def kalmanUpdate(zk, Xcloud, R, mu_m, P_m, h):
     P_p = V@D@V.T
     return mu_p, P_p
 
-def weightUpdate(wc, cluster_points, idx, zk, R, h):
+def weightUpdate(wc, cluster_points, idx, zk, R, h, file_id=None):
     wGains = np.zeros(wc.shape)
     for i in range(wc.shape[0]):
         cPts = cluster_points[idx == i, :]
@@ -286,16 +290,22 @@ def weightUpdate(wc, cluster_points, idx, zk, R, h):
         
         # TODO: Move out of loop
         wGains[i, 0] = sci.stats.multivariate_normal.pdf(zk.T, mean=zPredMean, cov=zPredCov)
-
+    #wGains_file = sio.loadmat(file_path + "weights\\wGains_" + str(file_id) + ".mat")
+    #wGains[:, 0] = wGains_file['wGains'][:,0]
     w = wc * wGains / np.sum(wc * wGains)
     return w
 
-def drawFrom(w, mu, P):
+def drawFrom(w, mu, P, file_id=None):
     wtoken = np.random.random()
+    #drawFrom_file = sio.loadmat(file_path + "dF\\drawFrom_" + str(file_id) + ".mat")
+    #wtoken_mat = drawFrom_file['wtoken'][0, 0]
+    #x_p = drawFrom_file['x_p']
+    #pos = drawFrom_file['pos'][0,0] - 1
     pos = np.searchsorted(np.cumsum(w), wtoken)
     mu_t = mu[pos,:]
     R_t = (P[pos,:] + P[pos,:].T)/2
-    x_p = np.random.multivariate_normal(mu_t, R_t)
+    #x_p = sci.stats.multivariate_normal.rvs(mu_t, R_t)
+    x_p = np.random.multivariate_normal(mu_t, R_t).astype(np.float64)
     return x_p.reshape([-1]), pos
 
 def getDiagCov(Xcloud):
@@ -677,6 +687,44 @@ def plotEllipses(data_cloud, data_truth, dist2km, vel2kms, title, save_path, sav
     fig.savefig(save_path + save_title + ".png")
     plt.close()
     
+def plotStDev(data, dist2km, vel2kms, title, save_title, save_path):
+    fig, axs = plt.subplots(2, 3)
+    fig.suptitle(title);
+    fig.tight_layout()
+    axs[0,0].scatter(np.arange(data.shape[0]), dist2km*data[:, 0])
+    axs[0,0].ticklabel_format(style='sci', axis='both', scilimits=(0,0))
+    axs[0,0].set_title('X')
+    axs[0,0].set_ylabel('Log sigma (km)')
+    
+    axs[0,1].scatter(np.arange(data.shape[0]), dist2km*data[:, 1])
+    axs[0,1].ticklabel_format(style='sci', axis='both', scilimits=(0,0))
+    axs[0,1].set_title('Y')
+    axs[0,1].set_ylabel('Log sigma (km)')
+
+    axs[0,2].scatter(np.arange(data.shape[0]), dist2km*data[:, 2])
+    axs[0,2].ticklabel_format(style='sci', axis='both', scilimits=(0,0))
+    axs[0,2].set_title('Z')
+    axs[0,2].set_ylabel('Log sigma (km)')
+    
+    axs[1,0].scatter(np.arange(data.shape[0]), dist2km*data[:, 3])
+    axs[1,0].set_title('Xdot')
+    axs[1,0].set_ylabel('Log sigma (km/s)')
+    
+    axs[1,1].scatter(np.arange(data.shape[0]), dist2km*data[:, 4])
+    axs[1,1].set_title('Ydot')
+    axs[1,1].set_ylabel('Log sigma (km/s)')
+    
+    axs[1,2].scatter(np.arange(data.shape[0]), dist2km*data[:, 5])
+    axs[1,2].set_title('Zdot')
+    axs[1,2].set_ylabel('Log sigma (km/s)')
+    
+    handles, labels = axs[0, 0].get_legend_handles_labels()
+    fig.supxlabel()
+    fig.legend(handles, labels, loc='upper right', ncol=2)
+    fig.tight_layout() 
+    fig.savefig(save_path + save_title + ".png")
+    plt.close()
+    
 def plotAzEl(data_cloud, data_truth, K, h, ts, save_path, save_title, idx, plot_cluster):
     colors = ["Red", "royalblue", "Green", "Yellow", "Magenta", "Cyan", "Black", "#500000", "#bf5700", "#00274c"]
     if plot_cluster:
@@ -701,12 +749,13 @@ def plotAzEl(data_cloud, data_truth, K, h, ts, save_path, save_title, idx, plot_
     
 if __name__ == '__main__':
     # Start the clock
+    np.random.seed(45823)
     plt.rcParams["figure.dpi"] = 300
     start_time = time.time()
     
     # Load noiseless observation data and other important .mat files
     file_path = "D:\\tarun\\EDP\\PAR_PGM_project\\Mod_IODOD\\Mod_IODOD\\"
-    save_path = "D:\\PythonProjects\\EDP\\PGM\\Test16\\SimFigures\\"
+    save_path = "D:\\PythonProjects\\EDP\\PGM\\Test19\\SimFigures\\"
     partial_ts_file = sio.loadmat(file_path + "partial_ts.mat") # Noiseless observation data
     full_ts_file = sio.loadmat(file_path + "full_ts.mat") # Position truth (topocentric frame)
     full_vts_file = sio.loadmat(file_path + "full_vts.mat") # Velocity truth (topocentric frame)
@@ -739,7 +788,8 @@ if __name__ == '__main__':
     
     R_t = np.diag(R_t)
     data_vec = np.random.multivariate_normal(mu_t, R_t).reshape([-1,1])
-    
+    #data_vec_file = sio.loadmat(file_path + "dataVec\\data_vec.mat")
+    #data_vec = data_vec_file['data_vec']
     for i in range(noised_obs.shape[0]):
         noised_obs[i,1:4] = data_vec[3*i:3*i+3, 0]
     
@@ -836,7 +886,7 @@ if __name__ == '__main__':
     X0cloud = np.zeros((L,6))
     
     for i in range(X0cloud.shape[0]):
-        X0cloud[i, :] = stateEstCloud(pf, np.copy(partial_ts), partial_ts[1,0]-partial_ts[0,0]+1e-15, file_path)
+        X0cloud[i, :] = stateEstCloud(pf, np.copy(partial_ts), partial_ts[1,0]-partial_ts[0,0]+1e-15, file_path, i+1)
     ############## Plotting ###############
     
     plotState(X0cloud, Xot_truth, dist2km, vel2kms, "Timestep " + str(t_truth*time2hr) + " Hours", save_path, "iodCloud", K= 1)
@@ -860,10 +910,13 @@ if __name__ == '__main__':
         X = ivp_result.y.T
         Xm_cloud[i,:] = convertToTopo(X[-1,:].T, t_int + interval)
         # Xm_cloud[i,:] = procNoise(Xm_cloud[i,:]) # Adds process noise
+    #Xm_cloud_Matlab_file = sio.loadmat(file_path + "Outside\\Xm_cloud_Outside.mat")
+    #Xm_cloud_Matlab = np.zeros(Xm_cloud.shape)
+    #Xm_cloud[:,:] = Xm_cloud_Matlab_file["Xm_cloud"][:,:]
     # Initialize variables
     Kn = 1 # Number of clusters (original)
     K = Kn # Number of clusters (changeable)
-    Kmax = 8 # Maximum number of clusters (Kmax = 1 for EnKF)
+    Kmax = 10 # Maximum number of clusters (Kmax = 1 for EnKF)
     
     mu_c = np.zeros((K, Xm_cloud.shape[1]))
     P_c = np.zeros((K, Xm_cloud.shape[1], Xm_cloud.shape[1]))
@@ -887,6 +940,7 @@ if __name__ == '__main__':
     
     # Cluster using K-means clustering algorithm
     C, _ = sci.cluster.vq.kmeans(sci.cluster.vq.whiten(Xm_norm), K) # Cluster just on position and velocity Normalize the whole thing
+    #C = np.array([[-1.998679000081438e-16, 9.081624341433780e-17, 2.615685446016869e-16, 5.048184092970586e-16, -1.687538997430238e-17, -1.665334536937735e-17]])
     idx, _ = sci.cluster.vq.vq(sci.cluster.vq.whiten(Xm_norm), C)
     
     # Convert cluster centers back to non-dimensionalized units
@@ -944,14 +998,14 @@ if __name__ == '__main__':
     if idx_meas.shape[0] != 0:
         R_vv = np.array([[theta_f*np.pi/648000, 0], [0, theta_f*np.pi/648000]])**2
         h = lambda x: np.array([np.arctan2(x[1],x[0]), np.pi/2 - np.arccos(x[2]/np.sqrt(x[0]**2 + x[1]**2 + x[2]**2))]) # Nonlinear measurement model
-        zt = getNoisyMeas(Xprop_truth, R_vv, h)
+        zt = getNoisyMeas(Xprop_truth, R_vv, h, 1)
     
         for i in range(K):
             # [mu_p{i}, P_p{i}] = ukfUpdate(zt, R_vv, mu_c{i}, P_c{i}, h)
             mu_p[i,:], P_p[i,:] = kalmanUpdate(zt, cPoints[i], R_vv, mu_c[i,:], P_c[i,:,:], h)
     
         # Weight update
-        wp = weightUpdate(wm, Xm_cloud, idx, zt, R_vv, h)
+        wp = weightUpdate(wm, Xm_cloud, idx, zt, R_vv, h, 1)
     
     else:
         for i in range(K):
@@ -964,8 +1018,10 @@ if __name__ == '__main__':
     c_id = np.zeros(Xp_cloud.shape[0])
     
     for i in range(L):
-        Xp_cloud[i,:], c_id[i] = drawFrom(wp, mu_p, P_p)
-    
+        Xp_cloud[i,:], c_id[i] = drawFrom(wp, mu_p, P_p, i+1)
+    #Xp_cloud_Matlab_file = sio.loadmat(file_path + "Outside\\Xp_cloud_Outside.mat")
+    #Xp_cloud_Matlab = np.zeros(Xp_cloud.shape)
+    #Xp_cloud[:,:] = Xp_cloud_Matlab_file["Xp_cloud"][:,:]
     mu_pExp = np.zeros((K, mu_p.shape[1]))
     mu_pExp[:,:] = mu_p[:,:]
     
@@ -1002,11 +1058,18 @@ if __name__ == '__main__':
     ent2[1] = np.log(la.det(np.cov(Xp_cloud.T)))
     ent1[0,:] = getDiagCov(X0cloud) 
     
-    Xp_cloud_Matlab_file = sio.loadmat(file_path + "Outside\\Xp_cloud_Outside.mat")
-    Xp_cloud_Matlab = np.zeros(Xp_cloud.shape)
-    Xp_cloud_Matlab[:,:] = Xp_cloud_Matlab_file["Xp_cloud"][:,:]
+    #Xp_cloud_Matlab_file = sio.loadmat(file_path + "Outside\\Xp_cloud_Outside.mat")
+    #Xp_cloud_Matlab = np.zeros(Xp_cloud.shape)
+    #Xp_cloud_Matlab[:,:] = Xp_cloud_Matlab_file["Xp_cloud"][:,:]
     Xp_cloudp = np.zeros(Xp_cloud.shape)
-    Xp_cloudp[:,:] = Xp_cloud_Matlab[:, :]
+    Xp_cloudp[:,:] = Xp_cloud[:, :]
+    mean = np.zeros(6)
+    std = np.zeros(6)
+    #for k in range(6):
+    #    mean[k] = np.mean(np.abs(Xp_cloud_Matlab[:, k]-Xp_cloud[:, k])*100/np.max((np.abs(Xp_cloud_Matlab[:, k]),np.abs(Xp_cloud[:, k]))))
+    #    std[k] = np.std(np.abs(Xp_cloud_Matlab[:, k]-Xp_cloud[:, k])*100/np.max((np.abs(Xp_cloud_Matlab[:, k]),np.abs(Xp_cloud[:, k]))))
+    #    plt.scatter(np.arange(Xp_cloud_Matlab.shape[0]),np.abs(Xp_cloud_Matlab[:, k]-Xp_cloud[:, k])*100/np.max((np.abs(Xp_cloud_Matlab[:, k]),np.abs(Xp_cloud[:, k]))))
+    #    plt.show()
     for ts in range(idx_start, idx_end-1):
         to = full_ts[ts,0]
         interval = full_ts[ts+1,0] - full_ts[ts,0]
@@ -1107,7 +1170,7 @@ if __name__ == '__main__':
                 ############## Plotting ###############
                 plotEllipses(Xm_cloud, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(tpr*time2hr,4)) + " Hours (Prior)", save_path, "Timestep_" + str(tau) + "_1A", K, mu_mat, P_mat)
                 plotState(Xm_cloud, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(time2hr*noised_obs[idx_meas,0][0],4)) + " Hours (Prior)", save_path, "Timestep_" + str(tau) + "_1B", K, idx, True)
-                np.savetxt("D:\\PythonProjects\\EDP\\PGM\\Test16\\cPoints" + str(ts+1) + ".txt", [cPoints[i].shape for i in range(len(cPoints))], delimiter=',', fmt='%f')
+                np.savetxt("D:\\PythonProjects\\EDP\\PGM\\Test19\\cPoints" + str(ts+1) + ".txt", [cPoints[i].shape for i in range(len(cPoints))], delimiter=',', fmt='%f')
                 plotAzEl(Xm_cloud, Xprop_truth, K, h, ts+1, save_path, "Timestep_" + str(tau) + "_1C", idx, plot_cluster=True)
                 ############## Return to Code ##############
         
@@ -1215,3 +1278,11 @@ if __name__ == '__main__':
     ############## Return to Code ###############
     print("Total Time: " + str(int(time.time()-start_time)))
     
+    plotStDev(ent1, dist2km, vel2kms, "StDevEvols", "Std Dev", save_path)
+
+    plt.plot(np.arange(ent2.shape[0]), ent2)    
+    plt.title('Entropy')
+    plt.xlabel('Filter Step #')
+    plt.ylabel('Entropy Metric')
+    plt.savefig(save_path + "Entropy" + ".png")
+    plt.close()
