@@ -393,9 +393,15 @@ def getKnEntropy(Kp, Xcloud):
     # TODO: Need whiten before kmeans
     #C, _ = sci.cluster.vq.kmeans(Xm_norm, Kp) # Cluster just on position and velocity Normalize the whole thing
     #idx, _ = sci.cluster.vq.vq(Xm_norm, C)
-    kmeans = KMeans(n_clusters=Kp, init="k-means++").fit(Xm_norm)
-    C = kmeans.cluster_centers_
-    idx = kmeans.labels_
+    while True:
+        kmeans = KMeans(n_clusters=Kp, init="k-means++").fit(Xm_norm)
+        C = kmeans.cluster_centers_
+        idx = kmeans.labels_
+        
+        if np.all(np.bincount(idx) > 6):  # Check if all clusters have more than 6 points
+            break
+        else:
+            Kp -= 1  # Reduce the number of clusters if condition is not met
     #contourCols = lines(6)
     
     # Convert cluster centers back to non-dimensionalized units
@@ -501,6 +507,7 @@ def plotState(data_cloud, data_truth, dist2km, vel2kms, title, save_path, save_t
     handles, labels = axs[0, 0].get_legend_handles_labels()
     fig.legend(handles, labels, loc='upper right', ncol=2)
     fig.tight_layout() 
+    #plt.show()
     fig.savefig(save_path + save_title + ".png")
     plt.close()
 
@@ -801,7 +808,7 @@ if __name__ == '__main__':
     bCS_idx = 0
     # Load noiseless observation data and other important .mat files
     file_path = "D:\\PythonProjects\\EDP\\PGM_Git\\PAR-PGM\\"
-    save_path = "D:\\PythonProjects\\EDP\\PGM\\Test31\SimFiguresb\\"
+    save_path = "D:\\PythonProjects\\EDP\\PGM\\Test1\SimFigures\\"
     if import_msmts_py:
         partial_ts = np.genfromtxt(file_path + "partial_ts.csv", delimiter=',')
         full_ts = np.genfromtxt(file_path + "full_ts.csv", delimiter=',')
@@ -940,10 +947,9 @@ if __name__ == '__main__':
     idx_prop = np.where(np.equal(full_ts[:, 0],t_truth))[0]
     Xprop_truth = np.hstack((full_ts[idx_prop+1,1:], full_vts[idx_prop+1,1:])).reshape([-1])
     
-    L = 750
+    L = 1000
     Lp = 1*L
     X0cloud = np.zeros((L,6))
-    pf = 0.25
     for i in range(X0cloud.shape[0]):
         X0cloud[i, :] = stateEstCloud(pf, np.copy(partial_ts), partial_ts[1,0]-partial_ts[0,0]+1e-15, file_path, i+1, import_msmts_py)
 
@@ -960,7 +966,7 @@ if __name__ == '__main__':
     Xm_cloud = np.zeros((L,6))
     Xm_cloud[:, :] = X0cloud[:, :]
     Xbt = np.zeros(X0cloud.shape)
-    Xbt_matlab = np.zeros(X0cloud.shape)
+    #Xbt_matlab = np.zeros(X0cloud.shape)
     
     termSat.terminal = True
     termSat.direction = 0
@@ -980,13 +986,9 @@ if __name__ == '__main__':
     #Xm_cloud_Matlab = np.zeros(Xm_cloud.shape)
     #Xm_cloud_Matlab[:,:] = Xm_cloud_Matlab_file["Xm_cloud"][:,:]
     # Initialize variables
-    Kn = 1 # Number of clusters (original)
+    Kn = 8 # Number of clusters (original)
     K = Kn # Number of clusters (changeable)
-    Kmax = 6 # Maximum number of clusters (Kmax = 1 for EnKF)
-    
-    mu_c = np.zeros((K, Xm_cloud.shape[1]))
-    P_c = np.zeros((K, Xm_cloud.shape[1], Xm_cloud.shape[1]))
-    wm = np.zeros((K, 1))
+    Kmax = 8 # Maximum number of clusters (Kmax = 1 for EnKF)
     
     #h = lambda x: np.array([np.arctan2(x[1],x[0]), np.pi/2 - np.arccos(x[2]/np.sqrt(x[0]**2 + x[1]**2 + x[2]**2))]) # Nonlinear measurement model
     #msmt_cloud = np.zeros((Xm_cloud.shape[0], 2))
@@ -1016,12 +1018,19 @@ if __name__ == '__main__':
     #Xm_norm = np.hstack((norm_rc, norm_vc, norm_msmt_az.reshape([-1, 1]), norm_msmt_el.reshape([-1, 1])))
     
     # Cluster using K-means clustering algorithm
-
-    #C, _ = sci.cluster.vq.kmeans(Xm_norm, K) # Cluster just on position and velocity Normalize the whole thing
-    #idx, _ = sci.cluster.vq.vq(Xm_norm, C)
-    kmeans = KMeans(n_clusters=K, init="k-means++").fit(Xm_norm)
-    C = kmeans.cluster_centers_
-    idx = kmeans.labels_
+    while True:
+        kmeans = KMeans(n_clusters=K, init="k-means++").fit(Xm_norm)
+        C = kmeans.cluster_centers_
+        idx = kmeans.labels_
+        
+        if np.all(np.bincount(idx) > 6):  # Check if all clusters have more than 6 points
+            break
+        else:
+            K -= 1  # Reduce the number of clusters if condition is not met
+    
+    mu_c = np.zeros((K, Xm_cloud.shape[1]))
+    P_c = np.zeros((K, Xm_cloud.shape[1], Xm_cloud.shape[1]))
+    wm = np.zeros((K, 1))
     
     # Convert cluster centers back to non-dimensionalized units
     C_unorm = np.zeros(C.shape)
@@ -1139,15 +1148,13 @@ if __name__ == '__main__':
     ent2[0] = np.log(la.det(np.cov(X0cloud.T)))
     ent2[1] = np.log(la.det(np.cov(Xp_cloud.T)))
     ent1[0,:] = getDiagCov(X0cloud) 
-    
 
-    Xp_cloud_Matlab_file = sio.loadmat("D:\\tarun\\EDP\\PAR_PGM_project\\Mod_IODOD\\Mod_IODOD\\Outside2\\Xp_cloud_Outside.mat")
-    Xp_cloud_Matlab = np.zeros(Xp_cloud.shape)
-    Xp_cloud_Matlab[:,:] = Xp_cloud_Matlab_file["Xp_cloud"][:,:]
+    #np.savetxt("D:\\PythonProjects\\EDP\\PGM_Git\\PAR-PGM\\" + "Xp_cloud_py.csv", Xp_cloud, delimiter=',', fmt='%f')
+    #Xp_cloud_Matlab_file = sio.loadmat("D:\\tarun\\EDP\\PAR_PGM_project\\Mod_IODOD\\Mod_IODOD\\Outside2\\Xp_cloud_Outside.mat")
+    #Xp_cloud_Matlab = np.zeros(Xp_cloud.shape)
+    #Xp_cloud_Matlab[:,:] = Xp_cloud_Matlab_file["Xp_cloud"][:,:]
     Xp_cloudp = np.zeros(Xp_cloud.shape)
-    Xp_cloudp[:,:] = Xp_cloud_Matlab[:,:]#Xp_cloud[:, :]
-    #mean = np.zeros(6)
-    #std = np.zeros(6)
+    Xp_cloudp[:,:] = Xp_cloud[:, :]
     #for k in range(6):
     #    mean[k] = np.mean(np.abs(Xp_cloud_Matlab[:, k]-Xp_cloud[:, k])*100/np.max((np.abs(Xp_cloud_Matlab[:, k]),np.abs(Xp_cloud[:, k]))))
     #    std[k] = np.std(np.abs(Xp_cloud_Matlab[:, k]-Xp_cloud[:, k])*100/np.max((np.abs(Xp_cloud_Matlab[:, k]),np.abs(Xp_cloud[:, k]))))
@@ -1181,8 +1188,8 @@ if __name__ == '__main__':
             # K = Kn
             if tpr >= cVal:
                 K = Kmax
-            #else:
-            #    K = Kn
+            else:
+                K = Kn
                 
             #h = lambda x: np.array([np.arctan2(x[1],x[0]), np.pi/2 - np.arccos(x[2]/np.sqrt(x[0]**2 + x[1]**2 + x[2]**2))]) # Nonlinear measurement model
             #msmt_cloud = np.zeros((Xm_cloud.shape[0], 2))
@@ -1204,8 +1211,8 @@ if __name__ == '__main__':
             #norm_msmt_az = (msmt_cloud[:, 0] - mean_msmt[0])/la.norm(std_msmt[0])
             #norm_msmt_el = (msmt_cloud[:, 1] - mean_msmt[1])/la.norm(std_msmt[1])
             
-            Xm_norm = np.zeros(norm_vc.shape)
-            Xm_norm[:,:] = norm_vc[:,:]
+            #Xm_norm = np.zeros(norm_vc.shape)
+            #Xm_norm[:,:] = norm_vc[:,:]
             Xm_norm = np.hstack((norm_rc, norm_vc))
             #Xm_norm = np.hstack((norm_rc, norm_vc, norm_msmt_az.reshape([-1, 1]), norm_msmt_el.reshape([-1, 1])))
         
@@ -1215,11 +1222,15 @@ if __name__ == '__main__':
             print("Timestamp: " + str(round(tpr*time2hr,5)))
             
             # Cluster using K-means clustering algorithm
-            #temp, _ = sci.cluster.vq.kmeans(Xm_norm, K) # Cluster just on position and velocity Normalize the whole thing
-            #idx, _ = sci.cluster.vq.vq(Xm_norm, temp)
-            kmeans = KMeans(n_clusters=K, init="k-means++").fit(Xm_norm)
-            temp = kmeans.cluster_centers_
-            idx = kmeans.labels_
+            while True:
+                kmeans = KMeans(n_clusters=K, init="k-means++").fit(Xm_norm)
+                temp = kmeans.cluster_centers_
+                idx = kmeans.labels_
+                
+                if np.all(np.bincount(idx) > 6):  # Check if all clusters have more than 6 points
+                    break
+                else:
+                    K -= 1  # Reduce the number of clusters if condition is not met
     
             mu_c = np.zeros((K, Xm_cloud.shape[1]))
             mu_p = np.zeros((K, Xm_cloud.shape[1]))
@@ -1269,7 +1280,7 @@ if __name__ == '__main__':
                 plotEllipses(Xm_cloud, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(tpr*time2hr,4)) + " Hours (Prior)", save_path, "Timestep_" + str(tau) + "_1A", K, idx, mu_mat, P_mat)
                 plotState(Xm_cloud, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(time2hr*noised_obs[idx_meas,0][0],4)) + " Hours (Prior)", save_path, "Timestep_" + str(tau) + "_1B", K, idx, True)
 
-                np.savetxt("D:\\PythonProjects\\EDP\\PGM\\Test31\\cPoints" + str(ts+1) + ".txt", [cPoints[i].shape for i in range(len(cPoints))], delimiter=',', fmt='%f')
+                np.savetxt("D:\\PythonProjects\\EDP\\PGM\\Test1\\cPoints" + str(ts+1) + ".txt", [cPoints[i].shape for i in range(len(cPoints))], delimiter=',', fmt='%f')
                 plotAzEl(Xm_cloud, Xprop_truth, K, h, ts+1, save_path, "Timestep_" + str(tau) + "_1C", idx, plot_cluster=True)
                 ############## Return to Code ##############
         
@@ -1352,9 +1363,9 @@ if __name__ == '__main__':
             ent2[tau+2] = np.log(wsum)
         else:
             if tpr >= cVal:
-                Ke = 6#Kmax # Clusters used for calculating entropy
+                Ke = Kmax # Clusters used for calculating entropy
             else:
-                Ke = 1#Kn # Clusters used for calculating entropy
+                Ke = Kn # Clusters used for calculating entropy
             
             ent2[tau+2] = getKnEntropy(Ke, Xp_cloudp) # Get entropy as if you still are using six clusters
         if abs(tpr - cTimes[1]) < 1e-10:
