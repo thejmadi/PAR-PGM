@@ -101,8 +101,7 @@ elevation = 103.8
 # dtUTC = datetime(dtLCL, 'TimeZone','Z');     # Current UTC Time
 # UTC_vec = datevec(dtUTC); # Convert to vector
 
-# TODO: Need to verify time additions work correctly
-UTC_vec = dt.datetime(2024, 5, 3, 2, 41, 15, int(.1261889999956*1000*1000), tzinfo=dt.timezone.utc)
+UTC_vec = dt.datetime(2024, 5, 3, 2, 41, 15, tzinfo=dt.timezone.utc)
 t_add_dim = tstamp1 * (4.342)
 UTC_vec = UTC_vec + dt.timedelta(t_add_dim)
 
@@ -124,11 +123,9 @@ for i in range(rb.shape[0]):
     delt_add_dim = t_add_dim - 1/86400 
 
     updated_UTCtime = UTC_vec + dt.timedelta(t_add_dim)
-    #updated_UTCvec = datevec(updated_UTCtime)
-
+    
     delt_updatedUTCtime = UTC_vec + dt.timedelta(delt_add_dim)
-    #delt_updatedUTCvec = datevec(delt_updatedUTCtime)
-
+    
     reo_dim = pymap3d.geodetic2eci(obs_lat, obs_lon, elevation, updated_UTCtime)
     delt_reodim = pymap3d.geodetic2eci(obs_lat, obs_lon, elevation, delt_updatedUTCtime)
     reo_dim = np.asarray(reo_dim).reshape(3)
@@ -150,94 +147,6 @@ for i in range(rb.shape[0]):
     rom[i,:] = -reo_nondim[i,:] + (R_z@rem).reshape(-1)
     vot[i,:] = -veo_nondim[i,:] + (R_z@(vb[i,:].reshape(rbe.shape))).reshape(-1) + (dRz_dt@(-rbe + rb[i,:].reshape(rbe.shape))).reshape(-1)
 
-# TODO: 3D Plots
-'''
-# Plot the trajectory
-ax = plt.figure().add_subplot(projection='3d')
-plot3(dx_dt(:,1), dx_dt(:,2), dx_dt(:,3));
-plt.plot()
-xlabel('x');
-ylabel('y');
-zlabel('z');
-title('CR3BP Trajectory');
-grid on;
-hold on;
-
-# Plot masses
-plot3(-mu, 0, 0, 'ko')
-labels = {'Earth'};
-text(-mu, 0, 0, labels,'VerticalAlignment','bottom','HorizontalAlignment','right')
-
-plot3(1-mu, 0, 0, 'go')
-labels = {'Moon'};
-text(1-mu, 0, 0, labels,'VerticalAlignment','bottom','HorizontalAlignment','right')
-# xlim([0.95 1.05])
-
-# plot3(reo_nondim(:,1), reo_nondim(:,2), reo_nondim(:,3), 'r+')
-# labels = {'Observer'};
-# text(reo_nondim(1), reo_nondim(2), reo_nondim(3), labels,'VerticalAlignment','bottom','HorizontalAlignment','right')
-
-[ReX, ReY, ReZ] = sphere;
-
-# Here, we nondimensionalize Earth's radius by the distance between the
-# Earth and Moon centers
-
-ReX = 6371/384400 * ReX;
-ReY = 6371/384400 * ReY;
-ReZ = 6371/384400 * ReZ;
-surf(ReX, ReY, ReZ)
-
-# xlim([-0.03, 0.03])
-# ylim([-0.03, 0.03])
-# zlim([-0.03, 0.03])
-
-savefig(gcf, 'trajectory_ECI.fig')
-saveas(gcf, 'trajectory_ECI.png')
-'''
-# Plot the position parametrically w.r.t. time
-# TODO: Subplots
-'''
-figure(2)
-subplot(3,1,1)
-plot(t, dx_dt(:,1), 'r-')
-xlabel('Time')
-ylabel('x-Position')
-title('CB3RP x-Evolution')
-
-subplot(3,1,2)
-plot(t, dx_dt(:,2), 'g-')
-xlabel('Time')
-ylabel('y-Position')
-title('CB3RP y-Evolution')
-
-subplot(3,1,3)
-plot(t, dx_dt(:,3), 'b-')
-xlabel('Time')
-ylabel('z-Position')
-title('CB3RP z-Evolution')
-saveas(gcf, 'posEvolution.png')
-'''
-# Plot position evolutions between observer and target
-# TODO: 3d Plots
-'''
-figure(3)
-plot3(rot(:,1), rot(:,2), rot(:,3), 'g-');
-xlabel('x');
-ylabel('y');
-zlabel('z');
-title('Observer - Target Trajectory');
-grid on;
-hold on;
-
-# Plot observer
-plot3(0, 0, 0, 'ro')
-labels = {'Observer'};
-text(0, 0, 0, labels,'VerticalAlignment','bottom','HorizontalAlignment','right')
-
-savefig(gcf, 'rot_trajectory_ECI.fig')
-saveas(gcf, 'rot_trajectory_ECI.png')
-'''
-
 # Before we obtain AZ and EL quantities, we must convert our
 # observer-target vector into a topocentric frame.
 
@@ -247,7 +156,6 @@ vot_topo = np.zeros((t.shape[0],rot.shape[1]))
 
 for i in range(t.shape[0]):
     # Step 1: Find the unit vectors governing this topocentric frame
-    # TODO: Check if using right norm
     z_hat_topo = reo_nondim[i,:]/la.norm(reo_nondim[i,:])
 
     x_hat_topo_unorm = np.cross(z_hat_topo, np.array([0, 0, 1])) # We choose a reference vector 
@@ -272,7 +180,6 @@ for i in range(t.shape[0]):
 
     dA_dt = np.vstack((xhat_dot_topo, yhat_dot_topo, zhat_dot_topo))
 
-    # vot_topo[i,:] = [dot(vot[i,:], x_hat_topo), dot(vot[i,:], y_hat_topo), dot(vot[i,:], z_hat_topo)]' + dA_dt*rot_topo[i,:]';
     vot_topo[i,:] = (R_topo@vot[i,:].reshape((-1, 1)) + dA_dt@rot[i,:].reshape((-1, 1))).reshape(-1)
 
 # Due to not being able to see targets behindthe moon, design function such 
@@ -293,7 +200,7 @@ for i in range(t.shape[0]):
         rot_valid.append(rot_topo[i,:])
         vot_valid.append(vot_topo[i,:])
     
-# TODO: Check list => array correct
+
 rot_valid = np.asarray(rot_valid)
 vot_valid = np.asarray(vot_valid)
 t_valid = np.asarray(t_valid)
@@ -315,65 +222,13 @@ for i in range(rot_valid.shape[0]):
 t_valid = t_valid.reshape([-1, 1])
 full_ts = np.hstack((t_valid.reshape([-1, 1]), Rho, AZ, EL)) # Full augmented time-series vector
 first_msmt = np.where(full_ts[:,0] > 6)[0][0]
-#for i in range(t_valid.shape[0]):
-#    if (full_ts[i, 3] < 0):
-#        partial_ts_ECI = partial_ts_ECI[~np.any(partial_ts_ECI == np.hstack((t_valid[i], Rho[i], AZ[i], EL[i])), 1), :]
+
 valid_El = np.where(full_ts[:,3] > 0)[0]
 valid_Az = np.where(np.abs(full_ts[:,2]) < 0.5*np.pi)[0]
-partial_ts_ECI = full_ts[valid_El, :]#[np.intersect1d(valid_El, valid_Az), :]
-#partial_ts_ECI = full_ts[np.intersect1d(valid_El, np.hstack((np.arange(0, first_msmt), valid_Az[np.where(valid_Az <= first_msmt)[0][-1]:]))), :]
+partial_ts_ECI = full_ts[valid_El, :]
 
-print()
-# TODO: Need to translate plotting stuff still
-'''
-# Plot the spherical coordinates of the observer parametrically w.r.t. time
-figure(4)
-subplot(3,1,1)
-plot(partial_ts_ECI(:,1), partial_ts_ECI(:,2), 'ro')
-xlabel('Time')
-ylabel('Range (non-dim)')
-# xlim([-tstamp1 t(end)])
-title('Observer Range Measurements (Ideal)')
-
-subplot(3,1,2)
-plot(partial_ts_ECI(:,1), partial_ts_ECI(:,3), 'go')
-xlabel('Time')
-ylabel('Azimuth Angle (rad)')
-# xlim([-tstamp1 t(end)])
-title('Observer Azimuth Angle Measurements (Ideal)')
-
-subplot(3,1,3)
-plot(partial_ts_ECI(:,1), partial_ts_ECI(:,4), 'bo')
-xlabel('Time')
-ylabel('Elevation Angle (rad)')
-# xlim([-tstamp1 t(end)])
-title('Observer Elevation Angle Measurements (Ideal)')
-saveas(gcf, 'observations_ECI.png')
-'''
 
 np.savetxt(save_path + "partial_ts.csv", partial_ts_ECI, delimiter=',', fmt='%f')
 np.savetxt(save_path + "full_ts.csv", np.hstack((t.reshape([-1, 1]), rot_topo)), delimiter=',', fmt='%f')
 np.savetxt(save_path + "full_vts.csv", np.hstack((t.reshape([-1, 1]), vot_topo)), delimiter=',', fmt='%f')
 
-# Next section for checking against Matlab results
-'''
-file_path = "D:\\tarun\\EDP\\PAR_PGM_project\\Mod_IODOD\\Mod_IODOD\\"
-partial_ts_file = sio.loadmat(file_path + "partial_ts.mat") # Noiseless observation data
-full_ts_file = sio.loadmat(file_path + "full_ts.mat") # Position truth (topocentric frame)
-full_vts_file = sio.loadmat(file_path + "full_vts.mat") # Velocity truth (topocentric frame)
-partial_ts_m = partial_ts_file['partial_ts']
-full_ts_m = full_ts_file['full_ts']
-full_vts_m = full_vts_file['full_vts']
-partial_ts_py = np.genfromtxt(save_path + "partial_ts.csv", delimiter=',')
-full_ts_py = np.genfromtxt(save_path + "full_ts.csv", delimiter=',')
-full_vts_py = np.genfromtxt(save_path + "full_vts.csv", delimiter=',')
-diff1 = np.abs(partial_ts_m - partial_ts_py)
-diff2 =  np.abs(full_ts_m - full_ts_py)
-diff3 =  np.abs(full_vts_m - full_vts_py)
-for i in range(diff1.shape[1]):
-    diff1[:,i] = 100*diff1[:,i]/np.max((np.abs(partial_ts_m[:,i]),np.abs(partial_ts_py[:,i])))
-for i in range(diff2.shape[1]):
-    diff2[:,i] = 100*diff2[:,i]/np.max((np.abs(full_ts_m[:,i]),np.abs(full_ts_py[:,i])))
-for i in range(diff3.shape[1]):
-    diff3[:,i] = 100*diff3[:,i]/np.max((np.abs(full_vts_m[:,i]),np.abs(full_vts_py[:,i])))
-'''
