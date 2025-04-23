@@ -27,17 +27,13 @@ def termSat(T, Y):
     return 1
 
 
-def stateEstCloud(pf, obTr, tdiff, file_path, file_id, import_msmts_py):
+def stateEstCloud(pf, obTr, tdiff, file_path):
     noised_obs = obTr
 
     R_t = np.zeros(3*noised_obs.shape[0]) # We shall diagonalize this later
     mu_t = np.zeros(3*noised_obs.shape[0])
 
-    if import_msmts_py:
-        partial_ts = np.genfromtxt(file_path + "partial_ts.csv", delimiter=',')
-    else:
-        partial_ts_file = sio.loadmat(file_path + "partial_ts.mat") # Noiseless observation data
-        partial_ts = partial_ts_file['partial_ts']
+    partial_ts = np.genfromtxt(file_path + "partial_ts.csv", delimiter=',')
     
     for i in range(obTr.shape[0]):
         mu_t[3*i:3*i+3] = np.array([partial_ts[i,1], partial_ts[i,2], partial_ts[i,3]])
@@ -63,13 +59,11 @@ def stateEstCloud(pf, obTr, tdiff, file_path, file_id, import_msmts_py):
     
     hdR = np.zeros((hdo.shape[0],4)) # Convert quantities of hdo to [X, Y, Z]
     hdR[:,0] = hdo[:,0] # Timestamp stays the same
-    # TODO: Check whether mult below is correct, should be elementwise
     hdR[:,1] = hdo[:,1] * np.cos(hdo[:,3]) * np.cos(hdo[:,2]) # Conversion to X
     hdR[:,2] = hdo[:,1] * np.cos(hdo[:,3]) * np.sin(hdo[:,2]) # Conversion to Y
     hdR[:,3] = hdo[:,1] * np.sin(hdo[:,3]) # Conversion to Z
 
     #pf = 0.50 # A factor between 0 to 1 describing the length of the day to interpolate [x, y]
-    # TODO: round works slightly differently in matlab vs python
     in_len = np.floor(pf * hdR.shape[0]+0.5).astype(int) # Length of interpolation interval
     hdR_p = hdR[:in_len,:] # Matrix for a partial half-day observation
 
@@ -237,7 +231,7 @@ def convertToTopo(X_bt, t_stamp):
     X_ot = np.hstack([rot_topo, vot_topo])
     return X_ot
 
-def getNoisyMeas(Xtruth, R, h, file_id=None):
+def getNoisyMeas(Xtruth, R, h):
     mzkm = h(Xtruth)
     zk = np.random.multivariate_normal(mzkm, R)
     zk = zk.reshape([-1,1]) # Make into column vector        
@@ -277,7 +271,7 @@ def kalmanUpdate(zk, Xcloud, R, mu_m, P_m, h):
     P_p = V@D@V.T
     return mu_p, P_p
 
-def weightUpdate(wc, cluster_points, idx, zk, R, h, file_id=None):
+def weightUpdate(wc, cluster_points, idx, zk, R, h):
     wGains = np.zeros(wc.shape)
     for i in range(wc.shape[0]):
         cPts = cluster_points[idx == i, :]
@@ -288,12 +282,11 @@ def weightUpdate(wc, cluster_points, idx, zk, R, h, file_id=None):
         zPredMean = np.mean(zPoints,0)
         zPredCov = np.cov(zPoints.T) + R
         
-        # TODO: Move out of loop
         wGains[i, 0] = sci.stats.multivariate_normal.pdf(zk.T, mean=zPredMean, cov=zPredCov)
     w = wc * wGains / np.sum(wc * wGains)
     return w
 
-def drawFrom(w, mu, P, file_id=None):
+def drawFrom(w, mu, P):
     wtoken = np.random.random()
     pos = np.searchsorted(np.cumsum(w), wtoken)
     mu_t = mu[pos,:]
@@ -346,9 +339,6 @@ def getKnEntropy(Kp, Xcloud):
     P_c = np.zeros((Kp, Xcloud.shape[1], Xcloud.shape[1]))
     w = np.zeros((Kp, 1))
     #h = lambda x: np.array([np.arctan2(x[1],x[0]), np.pi/2 - np.arccos(x[2]/np.sqrt(x[0]**2 + x[1]**2 + x[2]**2))]) # Nonlinear measurement model
-    #msmt_cloud = np.zeros((Xcloud.shape[0], 2))
-    #for i in range(Xcloud.shape[0]):
-    #    msmt_cloud[i, :] = h(Xcloud[i, :])
     # Split propagated cloud into position and velocity data before
     # normalization.
     rc = Xcloud[:,:3]
@@ -356,26 +346,16 @@ def getKnEntropy(Kp, Xcloud):
     
     mean_rc = np.mean(rc, 0)
     mean_vc = np.mean(vc, 0)
-    #mean_msmt = np.mean(msmt_cloud, 0)
     
     std_rc = np.std(rc,0, ddof=1)
     std_vc = np.std(vc,0, ddof=1)
-    #std_msmt = np.std(msmt_cloud, 0, ddof=1)
     
     norm_rc = (rc - mean_rc)/la.norm(std_rc) # Normalizing the position 
     norm_vc = (vc - mean_vc)/la.norm(std_vc) # Normalizing the velocity
-    #norm_msmt_az = (msmt_cloud[:, 0] - mean_msmt[0])/la.norm(std_msmt[0])
-    #norm_msmt_el = (msmt_cloud[:, 1] - mean_msmt[1])/la.norm(std_msmt[1])
     
-    #Xm_norm = np.zeros(norm_vc.shape)
-    #Xm_norm[:,:] = norm_vc[:,:]
     Xm_norm = np.hstack((norm_rc, norm_vc))
-    #Xm_norm = np.hstack((norm_rc, norm_vc, norm_msmt_az.reshape([-1, 1]), norm_msmt_el.reshape([-1, 1])))
     
     # Cluster using K-means clustering algorithm
-    # TODO: Need whiten before kmeans
-    #C, _ = sci.cluster.vq.kmeans(Xm_norm, Kp) # Cluster just on position and velocity Normalize the whole thing
-    #idx, _ = sci.cluster.vq.vq(Xm_norm, C)
     while True:
         kmeans = KMeans(n_clusters=Kp, init="k-means++").fit(Xm_norm)
         C = kmeans.cluster_centers_
@@ -385,15 +365,12 @@ def getKnEntropy(Kp, Xcloud):
             break
         else:
             Kp -= 1  # Reduce the number of clusters if condition is not met
-    #contourCols = lines(6)
     
     # Convert cluster centers back to non-dimensionalized units
     C_unorm = np.zeros(C.shape)
     C_unorm[:, :] = C[:, :]
     C_unorm[:,:3] = (C[:,:3]*std_rc) + mean_rc # Conversion of position
     C_unorm[:,3:6] = (C[:,3:6]*std_vc) + mean_vc
-    #C_unorm[:,6:7] = (C[:,6:7]*std_msmt[0]) + mean_msmt[0] # Conversion of velocity
-    #C_unorm[:,7:] = (C[:,7:]*std_msmt[1]) + mean_msmt[1]
     cPoints = []#cell(K,1)
     
     # Calculate covariances and weights for each cluster
@@ -513,9 +490,6 @@ def plotEllipses(data_cloud, data_truth, dist2km, vel2kms, title, save_path, sav
     contours_cell = np.zeros((K, 3))
     
     for k in range(K):
-        #cluster_data = data_cloud[idx == k, :]
-        #if cluster_data.shape[0] == 0:
-        #    cluster_data = np.full([1, 2], np.nan)
         Z = np.zeros(X_grid.shape[0])
         for i in range(X_grid.shape[0]):
             X_temp = (X_grid[i,:] - mu_marg[k,:]).reshape([1,-1])
@@ -548,9 +522,6 @@ def plotEllipses(data_cloud, data_truth, dist2km, vel2kms, title, save_path, sav
     contours_cell = np.zeros((K, 3))
     
     for k in range(K):
-        #cluster_data = data_cloud[idx == k, :]
-        #if cluster_data.shape[0] == 0:
-        #    cluster_data = np.full([1, 2], np.nan)
         Z = np.zeros(X_grid.shape[0])
         for i in range(X_grid.shape[0]):
             X_temp = (X_grid[i,:] - mu_marg[k,:]).reshape([1,-1])
@@ -583,9 +554,6 @@ def plotEllipses(data_cloud, data_truth, dist2km, vel2kms, title, save_path, sav
     contours_cell = np.zeros((K, 3))
     
     for k in range(K):
-        #cluster_data = data_cloud[idx == k, :]
-        #if cluster_data.shape[0] == 0:
-        #    cluster_data = np.full([1, 2], np.nan)
         Z = np.zeros(X_grid.shape[0])
         for i in range(X_grid.shape[0]):
             X_temp = (X_grid[i,:] - mu_marg[k,:]).reshape([1,-1])
@@ -619,9 +587,6 @@ def plotEllipses(data_cloud, data_truth, dist2km, vel2kms, title, save_path, sav
     contours_cell = np.zeros((K, 3))
     
     for k in range(K):
-        #cluster_data = data_cloud[idx == k, :]
-        #if cluster_data.shape[0] == 0:
-        #    cluster_data = np.full([1, 2], np.nan)
         Z = np.zeros(X_grid.shape[0])
         for i in range(X_grid.shape[0]):
             X_temp = (X_grid[i,:] - mu_marg[k,:]).reshape([1,-1])
@@ -653,9 +618,6 @@ def plotEllipses(data_cloud, data_truth, dist2km, vel2kms, title, save_path, sav
     contours_cell = np.zeros((K, 3))
     
     for k in range(K):
-        #cluster_data = data_cloud[idx == k, :]
-        #if cluster_data.shape[0] == 0:
-        #    cluster_data = np.full([1, 2], np.nan)
         Z = np.zeros(X_grid.shape[0])
         for i in range(X_grid.shape[0]):
             X_temp = (X_grid[i,:] - mu_marg[k,:]).reshape([1,-1])
@@ -687,9 +649,6 @@ def plotEllipses(data_cloud, data_truth, dist2km, vel2kms, title, save_path, sav
     contours_cell = np.zeros((K, 3))
     
     for k in range(K):
-        #cluster_data = data_cloud[idx == k, :]
-        #if cluster_data.shape[0] == 0:
-        #    cluster_data = np.full([1, 2], np.nan)
         Z = np.zeros(X_grid.shape[0])
         for i in range(X_grid.shape[0]):
             X_temp = (X_grid[i,:] - mu_marg[k,:]).reshape([1,-1])
@@ -751,7 +710,7 @@ def plotStDev(data, dist2km, vel2kms, title, save_title, save_path):
     fig.savefig(save_path + save_title + ".png")
     plt.close()
     
-def plotAzEl(data_cloud, data_truth, K, h, ts, save_path, save_title, idx, plot_cluster):
+def plotAzEl(data_cloud, data_truth, K, h, save_path, save_title, idx, plot_cluster):
     colors = ["Red", "royalblue", "Green", "Yellow", "Magenta", "Cyan", "Black", "#500000", "#bf5700", "#00274c"]
     if plot_cluster:
         for k in range(K):
@@ -773,37 +732,18 @@ def plotAzEl(data_cloud, data_truth, K, h, ts, save_path, save_title, idx, plot_
     plt.close()
     return
 
-def compPlot(data_1, data_2):
-    for k in range(data_1.shape[1]):
-        rel_diff = (data_1[:, k] - data_2[:, k]) /np.max(np.abs(np.hstack((data_1[:, k].reshape([-1,1]),data_2[:, k].reshape([-1,1])))), axis=1)
-        plt.scatter(np.arange(data_1.shape[0]), rel_diff)
-        plt.show()
-    mean = np.vstack((np.mean(data_1, axis=0).reshape([1, -1]), np.mean(data_2, axis=0).reshape([1, -1])))
-    std = np.vstack((np.std(data_1, axis=0).reshape([1, -1]), np.std(data_2, axis=0).reshape([1, -1])))
-    return mean, std
-
 if __name__ == '__main__':
     # Start the clock
-    #np.random.seed(45823)
     plt.rcParams["figure.dpi"] = 300
-    import_msmts_py = True # True if using msmts generated by cr3bp_dyn_ECI.py, and not cr3bp_dyn_ECI.mat
     start_time = time.time()
     
     # Load noiseless observation data and other important .mat files
     file_path = "D:\\PythonProjects\\EDP\\PGM_Git\\PAR-PGM\\"
     save_path = "D:\\PythonProjects\\EDP\\PGM\\Test1\SimFigures\\"
-    if import_msmts_py:
-        partial_ts = np.genfromtxt(file_path + "partial_ts.csv", delimiter=',')
-        full_ts = np.genfromtxt(file_path + "full_ts.csv", delimiter=',')
-        full_vts = np.genfromtxt(file_path + "full_vts.csv", delimiter=',')
-    else:
-        partial_ts_file = sio.loadmat(file_path + "partial_ts.mat") # Noiseless observation data
-        full_ts_file = sio.loadmat(file_path + "full_ts.mat") # Position truth (topocentric frame)
-        full_vts_file = sio.loadmat(file_path + "full_vts.mat") # Velocity truth (topocentric frame)
-        partial_ts = partial_ts_file['partial_ts']
-        full_ts = full_ts_file['full_ts']
-        full_vts = full_vts_file['full_vts']
-    
+    partial_ts = np.genfromtxt(file_path + "partial_ts.csv", delimiter=',')
+    full_ts = np.genfromtxt(file_path + "full_ts.csv", delimiter=',')
+    full_vts = np.genfromtxt(file_path + "full_vts.csv", delimiter=',')
+
     # Add observation noise to the observation data as follows:
     # Range - 5# of the current (i.e. noiseless) range
     # Azimuth - 1.5 arc sec (credit: Dr. Utkarsh Ranjan Mishra)
@@ -853,7 +793,6 @@ if __name__ == '__main__':
         else:
             cVal = noised_obs[-1, 0]
     
-    # TODO: Supposed to rewrite 1st entry?
     # Extract the first continuous observation track
     hdo = [] # Matrix for a half day observation
     hdo.append(noised_obs[0,:])
@@ -933,7 +872,7 @@ if __name__ == '__main__':
     Lp = 1*L
     X0cloud = np.zeros((L,6))
     for i in range(X0cloud.shape[0]):
-        X0cloud[i, :] = stateEstCloud(pf, np.copy(partial_ts), partial_ts[1,0]-partial_ts[0,0]+1e-15, file_path, i+1, import_msmts_py)
+        X0cloud[i, :] = stateEstCloud(pf, np.copy(partial_ts), partial_ts[1,0]-partial_ts[0,0]+1e-15, file_path)
 
     ############## Plotting ###############
     
@@ -962,10 +901,6 @@ if __name__ == '__main__':
     K = Kn # Number of clusters (changeable)
     Kmax = 8 # Maximum number of clusters (Kmax = 1 for EnKF)
     
-    #h = lambda x: np.array([np.arctan2(x[1],x[0]), np.pi/2 - np.arccos(x[2]/np.sqrt(x[0]**2 + x[1]**2 + x[2]**2))]) # Nonlinear measurement model
-    #msmt_cloud = np.zeros((Xm_cloud.shape[0], 2))
-    #for i in range(msmt_cloud.shape[0]):
-    #    msmt_cloud[i, :] = h(Xm_cloud[i, :])
     # Split propagated cloud into position and velocity data before
     # normalization.
     rc = Xm_cloud[:,:3]
@@ -973,21 +908,14 @@ if __name__ == '__main__':
     
     mean_rc = np.mean(rc, 0)
     mean_vc = np.mean(vc, 0)
-    #mean_msmt = np.mean(msmt_cloud, 0)
     
     std_rc = np.std(rc,0, ddof=1)
     std_vc = np.std(vc,0, ddof=1)
-    #std_msmt = np.std(msmt_cloud, 0, ddof=1)
     
     norm_rc = (rc - mean_rc)/la.norm(std_rc) # Normalizing the position 
     norm_vc = (vc - mean_vc)/la.norm(std_vc) # Normalizing the velocity
-    #norm_msmt_az = (msmt_cloud[:, 0] - mean_msmt[0])/la.norm(std_msmt[0])
-    #norm_msmt_el = (msmt_cloud[:, 1] - mean_msmt[1])/la.norm(std_msmt[1])
     
-    #Xm_norm = np.zeros(norm_vc.shape)
-    #Xm_norm[:,:] = norm_vc[:,:]
     Xm_norm = np.hstack((norm_rc, norm_vc))
-    #Xm_norm = np.hstack((norm_rc, norm_vc, norm_msmt_az.reshape([-1, 1]), norm_msmt_el.reshape([-1, 1])))
     
     # Cluster using K-means clustering algorithm
     while True:
@@ -1009,8 +937,6 @@ if __name__ == '__main__':
     C_unorm[:, :] = C[:, :]
     C_unorm[:,:3] = (C[:,:3]*std_rc) + mean_rc # Conversion of position
     C_unorm[:,3:6] = (C[:,3:6]*std_vc) + mean_vc
-    #C_unorm[:,6:7] = (C[:,6:7]*std_msmt[0]) + mean_msmt[0] # Conversion of velocity
-    #C_unorm[:,7:] = (C[:,7:]*std_msmt[1]) + mean_msmt[1] # Conversion of velocity
     
     cPoints = []
     
@@ -1027,10 +953,9 @@ if __name__ == '__main__':
     
     ############## Plotting ##############
     
-    # TODO: Plot 3D stuff
     plotState(Xm_cloud, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(time2hr*full_ts[idx_prop+1,0][0],4)) + " Hours (Prior)", save_path, "Timestep_0_1B", K, idx, True)
     h = lambda x: np.array([np.arctan2(x[1],x[0]), np.pi/2 - np.arccos(x[2]/np.sqrt(x[0]**2 + x[1]**2 + x[2]**2))]) # Nonlinear measurement model
-    #plotAzEl(cPoints, Xprop_truth, K, h, 0, save_path)
+    plotAzEl(Xm_cloud, Xprop_truth, K, h, save_path, "Timestep_0_1C", idx, plot_cluster=True)
     
     ############## Return to Code ##############
     
@@ -1056,7 +981,6 @@ if __name__ == '__main__':
     tpr = t_int + interval # Time stamp of the prior means, weights, and covariances
     idx_meas = np.where(abs(noised_obs[:,0] - tpr) < 1e-10)[0] # Find row with time
     
-    # TODO: Move to function, code is repeated later on
     #if idx_meas.shape[0] >= 1: # i.e. there exists a measurement
     if idx_meas.shape[0] != 0:
         R_vv = np.array([[theta_f*np.pi/648000, 0], [0, theta_f*np.pi/648000]])**2
@@ -1140,31 +1064,20 @@ if __name__ == '__main__':
             else:
                 K = Kn
                 
-            #h = lambda x: np.array([np.arctan2(x[1],x[0]), np.pi/2 - np.arccos(x[2]/np.sqrt(x[0]**2 + x[1]**2 + x[2]**2))]) # Nonlinear measurement model
-            #msmt_cloud = np.zeros((Xm_cloud.shape[0], 2))
-            #for i in range(msmt_cloud.shape[0]):
-            #    msmt_cloud[i, :] = h(Xm_cloud[i, :])
             rc = Xm_cloud[:,:3]
             vc = Xm_cloud[:,3:]
             
             mean_rc = np.mean(rc, 0)
             mean_vc = np.mean(vc, 0)
-            #mean_msmt = np.mean(msmt_cloud, 0)
             
             std_rc = np.std(rc,0, ddof=1)
             std_vc = np.std(vc,0, ddof=1)
-            #std_msmt = np.std(msmt_cloud,0, ddof=1)
             
             norm_rc = (rc - mean_rc)/la.norm(std_rc) # Normalizing the position 
             norm_vc = (vc - mean_vc)/la.norm(std_vc) # Normalizing the velocity
-            #norm_msmt_az = (msmt_cloud[:, 0] - mean_msmt[0])/la.norm(std_msmt[0])
-            #norm_msmt_el = (msmt_cloud[:, 1] - mean_msmt[1])/la.norm(std_msmt[1])
             
-            #Xm_norm = np.zeros(norm_vc.shape)
-            #Xm_norm[:,:] = norm_vc[:,:]
             Xm_norm = np.hstack((norm_rc, norm_vc))
-            #Xm_norm = np.hstack((norm_rc, norm_vc, norm_msmt_az.reshape([-1, 1]), norm_msmt_el.reshape([-1, 1])))
-        
+            
             # Verification Step
             idx_meas = np.where(abs(noised_obs[:,0] - tpr) < 1e-10)[0] # Find row with time
             
@@ -1230,7 +1143,7 @@ if __name__ == '__main__':
                 plotState(Xm_cloud, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(time2hr*noised_obs[idx_meas,0][0],4)) + " Hours (Prior)", save_path, "Timestep_" + str(tau) + "_1B", K, idx, True)
 
                 np.savetxt("D:\\PythonProjects\\EDP\\PGM\\Test1\\cPoints" + str(ts+1) + ".txt", [cPoints[i].shape for i in range(len(cPoints))], delimiter=',', fmt='%f')
-                plotAzEl(Xm_cloud, Xprop_truth, K, h, ts+1, save_path, "Timestep_" + str(tau) + "_1C", idx, plot_cluster=True)
+                plotAzEl(Xm_cloud, Xprop_truth, K, h, save_path, "Timestep_" + str(tau) + "_1C", idx, plot_cluster=True)
                 ############## Return to Code ##############
         
             if abs(to - (t_end-interval)) < 1e-10: # At final time step possible
@@ -1301,13 +1214,12 @@ if __name__ == '__main__':
             ############## Plotting ###############
             plotEllipses(Xp_cloudp, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(tpr*time2hr,4)) + " Hours (Post)", save_path, "Timestep_" + str(tau) + "_2A", K, c_id, mu_mat, P_mat)
             plotState(Xp_cloudp, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(tpr*time2hr,4)) + " Hours (Post)", save_path, "Timestep_" + str(tau) + "_2B", K, c_id, True)
-            plotAzEl(Xp_cloudp, Xprop_truth, K, h, ts+1, save_path, "Timestep_" + str(tau) + "_2C", c_id, plot_cluster=True)
+            plotAzEl(Xp_cloudp, Xprop_truth, K, h, save_path, "Timestep_" + str(tau) + "_2C", c_id, plot_cluster=True)
             ############## Return to Code ###############
         
         if idx_meas.shape[0] != 0:
             wsum = 0
             for k in range(K):
-                # TODO: Check if wp needs to be sum(wp)
                 wsum += np.sum(wp[k,:])*la.det(P_p[k, :, :])
             ent2[tau+2] = np.log(wsum)
         else:
