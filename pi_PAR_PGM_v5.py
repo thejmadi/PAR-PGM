@@ -299,30 +299,42 @@ def getDiagCov(Xcloud):
     P = np.cov(Xcloud.T)
     ent = np.diag(P)
     return ent
+    
+def propPoint(Xest, t_int, interval, dyn_obj=cr3bp, ev=termSat):
+        # First, convert from X_{ot} in the topocentric frame to X_{bt} in the
+        # synodic frame.
+        Xbest = backConvertSynodic(np.copy(Xest), t_int)
+        
+        # Next, propagate X_{bt} by a single time step and convert back to the 
+        # topographic frame. Begin by calling the integrator
+        
+        ivp_result = sci.integrate.solve_ivp(dyn_obj.cr3bp_dyn, (0, interval),
+        np.copy(Xbest), method='BDF', events=ev, rtol=1e-6, atol=1e-8) 
+        Xbt_est = ivp_result.y.T[-1, :]
+        
+        # Finish by converting back to topocentric reference frame
+        Xm = convertToTopo(np.copy(Xbt_est), t_int + interval)
+        
+        return Xbt_est, Xm
 
 def propagate(Xcloud, t_int, interval):
-    Xm_cloud = np.zeros(Xcloud.shape)
-    Xbt = np.zeros(Xcloud.shape)
-    Xm_bt = np.zeros(Xcloud.shape)
+    # Xm_cloud = np.zeros(Xcloud.shape)
+    # Xbt = np.zeros(Xcloud.shape)
+    # Xm_bt = np.zeros(Xcloud.shape)
 
     termSat.terminal = True
     termSat.direction = 0
     
+    pool_propInputs = []
     for i in range(Xcloud.shape[0]):
-        # First, convert from X_{ot} in the topocentric frame to X_{bt} in the
-        # synodic frame.
-        Xbt[i,:] = backConvertSynodic(np.copy(Xcloud[i,:]), t_int)
-        
-        # Next, propagate each X_{bt} in your particle cloud by a single time 
-        # step and convert back to the topographic frame.
-        # Call ode45()
-        
-        # Check Syn Results
-        ivp_result = sci.integrate.solve_ivp(cr3bp.cr3bp_dyn, (0, interval), np.copy(Xbt[i, :]), method='BDF', events=termSat, rtol=1e-6, atol=1e-8)
-        Xm_bt[i, :] = ivp_result.y.T[-1, :]
-        
-        # Convert back to Topocentric
-        Xm_cloud[i,:] = convertToTopo(np.copy(Xm_bt[i, :]), t_int + interval)
+        pool_propInputs.append((np.copy(Xcloud[i,:]), t_int, interval))
+    
+    with Pool(W) as p:
+        prop_Points = p.starmap(propPoint, pool_propInputs)
+    
+    Xm_bt = np.array([r[0] for r in prop_Points])
+    Xm_cloud = np.array([r[1] for r in prop_Points])
+    
     return Xm_cloud
 
 
@@ -339,63 +351,75 @@ def getKnEntropy(Kp, Xcloud):
     mu_c = np.zeros((Kp, Xcloud.shape[1]))
     P_c = np.zeros((Kp, Xcloud.shape[1], Xcloud.shape[1]))
     w = np.zeros((Kp, 1))
+    
     #h = lambda x: np.array([np.arctan2(x[1],x[0]), np.pi/2 - np.arccos(x[2]/np.sqrt(x[0]**2 + x[1]**2 + x[2]**2))]) # Nonlinear measurement model
     # Split propagated cloud into position and velocity data before
     # normalization.
-    rc = Xcloud[:,:3]
-    vc = Xcloud[:,3:]
     
-    mean_rc = np.mean(rc, 0)
-    mean_vc = np.mean(vc, 0)
-    
-    std_rc = np.std(rc,0, ddof=1)
-    std_vc = np.std(vc,0, ddof=1)
-    
-    norm_rc = (rc - mean_rc)/la.norm(std_rc) # Normalizing the position 
-    norm_vc = (vc - mean_vc)/la.norm(std_vc) # Normalizing the velocity
-    
-    Xm_norm = np.hstack((norm_rc, norm_vc))
-    
-    # Cluster using K-means clustering algorithm
-    while True:
-        kmeans = KMeans(n_clusters=K, init="k-means++").fit(Xm_norm)
-        C = kmeans.cluster_centers_
-        idx = kmeans.labels_
+    if (Kp > 1):
+        rc = Xcloud[:,:3]
+        vc = Xcloud[:,3:]
         
-        if np.all(np.bincount(idx) > 6):  # Check if all clusters have more than 6 points
-            break
-        else:
-            Kp -= 1  # Reduce the number of clusters if condition is not met
-    
-    # Convert cluster centers back to non-dimensionalized units
-    C_unorm = np.zeros(C.shape)
-    C_unorm[:, :] = C[:, :]
-    C_unorm[:,:3] = (C[:,:3]*std_rc) + mean_rc # Conversion of position
-    C_unorm[:,3:6] = (C[:,3:6]*std_vc) + mean_vc
-    cPoints = []#cell(K,1)
-    
-    # Calculate covariances and weights for each cluster
-    for k in range(Kp):
-        cluster_points = Xcloud[idx == k, :] # Keep clustering very separate from mean, covariance, weight calculations
-        cPoints.append(cluster_points)
-        cSize = cPoints[k].shape
-        mu_c[k, :] = np.mean(cluster_points, 0) # Cell of GMM means 
-    
-        if cSize[0] != 1:
-            P_c[k, :, :] = np.cov(cluster_points.T) # Cell of GMM covariances
-        w[k, :] = cluster_points.shape[0] / Xm_norm.shape[0] # Vector of weights
+        mean_rc = np.mean(rc, 0)
+        mean_vc = np.mean(vc, 0)
         
-    wsum = 0
-    for k in range(Kp):
-        wsum += w[k]*la.det(P_c[k,:,:].T)
-    ent = np.log(wsum)
+        std_rc = np.std(rc,0, ddof=1)
+        std_vc = np.std(vc,0, ddof=1)
+        
+        norm_rc = (rc - mean_rc)/la.norm(std_rc) # Normalizing the position 
+        norm_vc = (vc - mean_vc)/la.norm(std_vc) # Normalizing the velocity
+        
+        Xm_norm = np.hstack((norm_rc, norm_vc))
+        
+        # Cluster using K-means clustering algorithm
+        while True:
+            kmeans = KMeans(n_clusters=K, init="k-means++").fit(Xm_norm)
+            C = kmeans.cluster_centers_
+            idx = kmeans.labels_
+            
+            if np.all(np.bincount(idx) > 6):  # Check if all clusters have more than 6 points
+                break
+            else:
+                Kp -= 1  # Reduce the number of clusters if condition is not met
+        
+        # Convert cluster centers back to non-dimensionalized units
+        C_unorm = np.zeros(C.shape)
+        C_unorm[:, :] = C[:, :]
+        C_unorm[:,:3] = (C[:,:3]*std_rc) + mean_rc # Conversion of position
+        C_unorm[:,3:6] = (C[:,3:6]*std_vc) + mean_vc
+        cPoints = []#cell(K,1)
+        
+        # Calculate covariances and weights for each cluster
+        for k in range(Kp):
+            cluster_points = Xcloud[idx == k, :] # Keep clustering very separate from mean, covariance, weight calculations
+            cPoints.append(cluster_points)
+            cSize = cPoints[k].shape
+            mu_c[k, :] = np.mean(cluster_points, 0) # Cell of GMM means 
+        
+            if cSize[0] != 1:
+                P_c[k, :, :] = np.cov(cluster_points.T) # Cell of GMM covariances
+            w[k, :] = cluster_points.shape[0] / Xm_norm.shape[0] # Vector of weights
+            
+        wsum = 0
+        for k in range(Kp):
+            wsum += w[k]*la.det(P_c[k,:,:].T)
+        ent = np.log(wsum)
+    
+    else:
+        ent = np.log(la.det(np.cov(Xcloud.T)))
+    
     return ent
 
 def plotState(data_cloud, data_truth, dist2km, vel2kms, title, save_path, save_title, K = None, idx = None, plot_cluster = False):
     fig, axs = plt.subplots(2, 3)
     fig.suptitle(title);
     fig.tight_layout()
-    colors = ["Red", "royalblue", "Green", "Yellow", "Magenta", "Cyan", "Black", "#500000", "#bf5700", "#00274c"]
+    
+    # Reference https://matplotlib.org/stable/gallery/color/named_colors.html 
+    # for full list of colors
+    
+    colors = ["Red", "royalblue", "Green", "Yellow", "Magenta", "Cyan", "tan",
+            "#500000", "#bf5700", "#00274c", "azure", "lightpink"]
     if plot_cluster:
         for k in range(K):
             clusterPoints = data_cloud[idx == k, :]
@@ -473,7 +497,12 @@ def plotState(data_cloud, data_truth, dist2km, vel2kms, title, save_path, save_t
     plt.close()
 
 def plotEllipses(data_cloud, data_truth, dist2km, vel2kms, title, save_path, save_title, K, idx, mu_mat, P_mat):
-    colors = ["Red", "royalblue", "Green", "Yellow", "Magenta", "Cyan", "Black", "#500000", "#bf5700", "#00274c"]
+    # Reference https://matplotlib.org/stable/gallery/color/named_colors.html 
+    # for full list of colors
+    
+    colors = ["Red", "royalblue", "Green", "Yellow", "Magenta", "Cyan", "tan",
+            "#500000", "#bf5700", "#00274c", "azure", "lightpink"]
+            
     fig, axs = plt.subplots(2, 3)
     fig.suptitle(title);
     
@@ -712,7 +741,12 @@ def plotStDev(data, dist2km, vel2kms, title, save_title, save_path):
     plt.close()
     
 def plotAzEl(data_cloud, data_truth, K, h, save_path, save_title, idx, plot_cluster):
-    colors = ["Red", "royalblue", "Green", "Yellow", "Magenta", "Cyan", "Black", "#500000", "#bf5700", "#00274c"]
+    # Reference https://matplotlib.org/stable/gallery/color/named_colors.html 
+    # for full list of colors
+    
+    colors = ["Red", "royalblue", "Green", "Yellow", "Magenta", "Cyan", "tan",
+            "#500000", "#bf5700", "#00274c", "azure", "lightpink"]
+            
     if plot_cluster:
         for k in range(K):
             clusterPoints = data_cloud[idx == k, :]
@@ -733,8 +767,8 @@ def plotAzEl(data_cloud, data_truth, K, h, save_path, save_title, idx, plot_clus
     plt.title('AZ-EL Python')
     plt.xlabel('Azimuth Angle (deg)')
     plt.ylabel('Elevation Angle (deg)')
-    # plt.ylim(-90, 90)
-    # plt.xlim(-180,180)
+    plt.ylim(-90, 90)
+    plt.xlim(-180,180)
     plt.savefig(save_path + save_title + ".png")
     plt.close()
     return
@@ -762,13 +796,14 @@ if __name__ == '__main__':
     mu_t = np.zeros(3*noised_obs.shape[0])
     noised_obs[:, :] = partial_ts[:, :]
     
-    
     theta_f = 1.5 # Arc-seconds of error covariance
     R_f = 0.05 # Range percentage error covariance
     
     dist2km = 384400 # Kilometers per non-dimensionalized distance
     time2hr = 4.342*24 # Hours per non-dimensionalized time
     vel2kms = dist2km/(time2hr*60*60) # Kms per non-dimensionalized velocity
+    
+    W = 8 # Parallelization factor
     
     for i in range(partial_ts.shape[0]):
         mu_t[3*i:3*i+3] = np.array([partial_ts[i,1], partial_ts[i,2], partial_ts[i,3]])
@@ -875,38 +910,46 @@ if __name__ == '__main__':
     idx_prop = np.where(np.equal(full_ts[:, 0],t_truth))[0]
     Xprop_truth = np.hstack((full_ts[idx_prop+1,1:], full_vts[idx_prop+1,1:])).reshape([-1])
     
-    L = 6000
+    L = 8000
     Lp = 1*L
     X0cloud = np.zeros((L,6))
+    
+    pool_cloudInputs = []
     for i in range(X0cloud.shape[0]):
-        X0cloud[i, :] = stateEstCloud(pf, np.copy(partial_ts), partial_ts[1,0]-partial_ts[0,0]+1e-15, file_path)
+        pool_cloudInputs.append((pf, np.copy(partial_ts), partial_ts[1,0]-partial_ts[0,0]+1e-15, file_path))
+    
+    with Pool(W) as p:
+        X0cloudPack = p.starmap(stateEstCloud, pool_cloudInputs)
+    
+    X0cloudPack = np.asarray(X0cloudPack)
+    X0cloud = np.squeeze(X0cloudPack[:,0,:])
+    
+    num_workers = p._processes
+    print("Number of parallel processing workers: " + str(num_workers))
 
     ############## Plotting ###############
     
-    plotState(X0cloud, Xot_truth, dist2km, vel2kms, "Timestep " + str(t_truth*time2hr) + " Hours", save_path, "iodCloud", K= 1)
+    plotState(X0cloud, Xot_truth, dist2km, vel2kms, 
+        "Timestep " + str(t_truth*time2hr) + " Hours", save_path, "iodCloud", 
+        K= 1)
 
     ############## Return to Code ##############
     t_int = hdR_p[-1,0] # Time at which we are obtaining a state cloud
     tspan = np.array([0, interval]) # Integrate over just a single time step
+    
     Xm_cloud = np.zeros((L,6))
     Xm_cloud[:, :] = X0cloud[:, :]
     Xbt = np.zeros(X0cloud.shape)
     
-    termSat.terminal = True
-    termSat.direction = 0
-    for i in range(X0cloud.shape[0]):
-        Xbt[i,:] = backConvertSynodic(X0cloud[i,:], t_int)
-        # Next, propagate each X_{bt} in your particle cloud by a single time 
-        # step and convert back to the topographic frame.
-        # Call ode45()
-        ivp_result = sci.integrate.solve_ivp(cr3bp.cr3bp_dyn, (0, interval), np.copy(Xbt[i, :]), method='BDF', events=termSat, rtol=1e-6, atol=1e-8)
-        X = ivp_result.y.T
-        Xm_cloud[i,:] = convertToTopo(X[-1,:].T, t_int + interval)
-        # Xm_cloud[i,:] = procNoise(Xm_cloud[i,:]) # Adds process noise
+    # Propagation Step
+    Xm_cloud = propagate(X0cloud, t_int, interval)
+    # Xprop_truth = propagate(Xprop_truth.reshape([1,-1]), t_int, interval)
+    # Xprop_truth = Xprop_truth.reshape([-1])
+    
     # Initialize variables
-    Kn = 6 # Number of clusters (original)
+    Kn = 8 # Number of clusters (original)
     K = Kn # Number of clusters (changeable)
-    Kmax = 10 # Maximum number of clusters (Kmax = 1 for EnKF)
+    Kmax = 12 # Maximum number of clusters (Kmax = 1 for EnKF)
     
     # Split propagated cloud into position and velocity data before
     # normalization.
@@ -926,8 +969,8 @@ if __name__ == '__main__':
     
     # Cluster using K-means clustering algorithm
     while True:
-        # kmeans = KMeans(n_clusters=K, init="k-means++").fit(Xm_norm)
-        kmeans = KMeans(n_clusters=K, init="k-means++").fit(Xm_cloud)
+        kmeans = KMeans(n_clusters=K, init="k-means++").fit(Xm_norm)
+        # kmeans = KMeans(n_clusters=K, init="k-means++").fit(Xm_cloud)
         C = kmeans.cluster_centers_
         idx = kmeans.labels_
         
@@ -961,9 +1004,12 @@ if __name__ == '__main__':
     
     ############## Plotting ##############
     
-    plotState(Xm_cloud, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(time2hr*full_ts[idx_prop+1,0][0],4)) + " Hours (Prior)", save_path, "Timestep_0_1B", K, idx, True)
+    plotState(Xm_cloud, Xprop_truth, dist2km, vel2kms, 
+        "Timestep " + str(round(time2hr*full_ts[idx_prop+1,0][0],4)) + " Hours (Prior)", 
+        save_path, "Timestep_0_1B", K, idx, True)
     h = lambda x: np.array([np.arctan2(x[1],x[0]), np.pi/2 - np.arccos(x[2]/np.sqrt(x[0]**2 + x[1]**2 + x[2]**2))]) # Nonlinear measurement model
-    plotAzEl(Xm_cloud, Xprop_truth, K, h, save_path, "Timestep_0_1C", idx, plot_cluster=True)
+    plotAzEl(Xm_cloud, Xprop_truth, K, h, save_path, "Timestep_0_1C", idx, 
+        plot_cluster=True)
     
     ############## Return to Code ##############
     
@@ -1095,8 +1141,8 @@ if __name__ == '__main__':
             
             # Cluster using K-means clustering algorithm
             while True:
-                # kmeans = KMeans(n_clusters=K, init="k-means++").fit(Xm_norm)
-                kmeans = KMeans(n_clusters=K, init="k-means++").fit(Xm_cloud)
+                kmeans = KMeans(n_clusters=K, init="k-means++").fit(Xm_norm)
+                # kmeans = KMeans(n_clusters=K, init="k-means++").fit(Xm_cloud)
                 temp = kmeans.cluster_centers_
                 idx = kmeans.labels_
                 
@@ -1150,11 +1196,17 @@ if __name__ == '__main__':
                 P_mat[:,:,:] = P_c[:,:,:]
         
                 ############## Plotting ###############
-                plotEllipses(Xm_cloud, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(tpr*time2hr,4)) + " Hours (Prior)", save_path, "Timestep_" + str(tau+1) + "_1A", K, idx, mu_mat, P_mat)
-                plotState(Xm_cloud, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(time2hr*noised_obs[idx_meas,0][0],4)) + " Hours (Prior)", save_path, "Timestep_" + str(tau+1) + "_1B", K, idx, True)
+                plotEllipses(Xm_cloud, Xprop_truth, dist2km, vel2kms, 
+                    "Timestep " + str(round(tpr*time2hr,4)) + " Hours (Prior)", 
+                    save_path, "Timestep_" + str(tau+1) + "_1A", K, idx, mu_mat, 
+                    P_mat)
+                plotState(Xm_cloud, Xprop_truth, dist2km, vel2kms, 
+                    "Timestep " + str(round(time2hr*noised_obs[idx_meas,0][0],4)) + " Hours (Prior)", 
+                    save_path, "Timestep_" + str(tau+1) + "_1B", K, idx, True)
 
                 np.savetxt("./TextFiles/cPoints" + str(ts+1) + ".txt", [cPoints[i].shape for i in range(len(cPoints))], delimiter=',', fmt='%f')
-                plotAzEl(Xm_cloud, Xprop_truth, K, h, save_path, "Timestep_" + str(tau+1) + "_1C", idx, plot_cluster=True)
+                plotAzEl(Xm_cloud, Xprop_truth, K, h, save_path, 
+                    "Timestep_" + str(tau+1) + "_1C", idx, plot_cluster=True)
                 ############## Return to Code ##############
         
             if abs(to - (t_end-interval)) < 1e-10: # At final time step possible
@@ -1204,9 +1256,15 @@ if __name__ == '__main__':
             P_mat[:,:,:] = P_p[:,:,:]
             
             ############## Plotting ###############
-            plotEllipses(Xp_cloud, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(tpr*time2hr,4)) + " Hours (Post)", save_path, "Timestep_" + str(tau+1) + "_2A", K, c_id, mu_mat, P_mat)
-            plotState(Xp_cloud, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(tpr*time2hr,4)) + " Hours (Post)", save_path, "Timestep_" + str(tau+1) + "_2B", K, c_id, True)
-            plotAzEl(Xp_cloud, Xprop_truth, K, h, save_path, "Timestep_" + str(tau+1) + "_2C", c_id, plot_cluster=True)
+            plotEllipses(Xp_cloud, Xprop_truth, dist2km, vel2kms, 
+                "Timestep " + str(round(tpr*time2hr,4)) + " Hours (Post)", 
+                save_path, "Timestep_" + str(tau+1) + "_2A", K, c_id, mu_mat, 
+                P_mat)
+            plotState(Xp_cloud, Xprop_truth, dist2km, vel2kms, 
+                "Timestep " + str(round(tpr*time2hr,4)) + " Hours (Post)", 
+                save_path, "Timestep_" + str(tau+1) + "_2B", K, c_id, True)
+            plotAzEl(Xp_cloud, Xprop_truth, K, h, save_path, 
+                "Timestep_" + str(tau+1) + "_2C", c_id, plot_cluster=True)
             ############## Return to Code ###############
         
         else:
@@ -1233,9 +1291,15 @@ if __name__ == '__main__':
             P_mat[:,:,:] = P_p[:,:,:]
             
             ############## Plotting ###############
-            plotEllipses(Xp_cloud, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(tpr*time2hr,4)) + " Hours (Post)", save_path, "Timestep_" + str(tau+1) + "_2A", K, c_id, mu_mat, P_mat)
-            plotState(Xp_cloud, Xprop_truth, dist2km, vel2kms, "Timestep " + str(round(tpr*time2hr,4)) + " Hours (Post)", save_path, "Timestep_" + str(tau+1) + "_2B")
-            plotAzEl(Xp_cloud, Xprop_truth, K, h, save_path, "Timestep_" + str(tau+1) + "_2C", c_id, plot_cluster=False)
+            plotEllipses(Xp_cloud, Xprop_truth, dist2km, vel2kms, 
+                "Timestep " + str(round(tpr*time2hr,4)) + " Hours (Post)", 
+                save_path, "Timestep_" + str(tau+1) + "_2A", K, c_id, mu_mat, 
+                P_mat)
+            plotState(Xp_cloud, Xprop_truth, dist2km, vel2kms, 
+                "Timestep " + str(round(tpr*time2hr,4)) + " Hours (Post)", 
+                save_path, "Timestep_" + str(tau+1) + "_2B")
+            plotAzEl(Xp_cloud, Xprop_truth, K, h, save_path, 
+                "Timestep_" + str(tau+1) + "_2C", c_id, plot_cluster=False)
             ############## Return to Code ###############
         
         
@@ -1246,12 +1310,13 @@ if __name__ == '__main__':
             ent2[tau+2] = np.log(wsum)
         else:
             if tpr >= cVal:
-                Ke = Kmax # Clusters used for calculating entropy
+                Ke = K # Clusters used for calculating entropy
             else:
-                Ke = Kn # Clusters used for calculating entropy
+                Ke = K # Clusters used for calculating entropy
             
             ent2[tau+2] = getKnEntropy(Ke, Xp_cloud) # Get entropy as if you still are using six clusters
-        
+        if abs(tpr - cVal) < 1e-10:
+            Lp = 10000
         '''
         if abs(tpr - cTimes[1]) < 1e-10:
             Lp = 2000
