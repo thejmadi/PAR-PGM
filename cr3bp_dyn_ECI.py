@@ -18,8 +18,19 @@ def termSat(T, Y):
     Rm = 1740/384400 # Nondimensionalized radius of the moon
     value = (np.sqrt((Y[0] + mu)**2 + Y[1]**2 + Y[2]**2) < 6371/384400) or (np.sqrt((Y[0] - (1-mu))**2 + Y[1]**2 + Y[2]**2) < Rm) # Stop when the target hits the Earth's or the Moon's surface
     return 1
+    
+def appendObs(zvec, N):
+    M = len(zvec[:,0])
+    
+    if (M < N): # Verify that the number of observations in a pass is no more than N.
+        N = M
+        
+    startIndex = np.random.randint(1, M-N+1)
+    passVec = zvec[startIndex:(startIndex+N),:]
+    
+    return passVec
 
-save_path = "D:\\PythonProjects\\EDP\\PGM_Git\\PAR-PGM\\"
+save_path = "./"
 # Define initial conditions
 mu = 1.2150582e-2
 # x0 = [0.5-mu, 0.0455, 0, -0.5, 0.5, 0.0]' # Sample Starting Point
@@ -32,8 +43,8 @@ mu = 1.2150582e-2
 # x0 = [0.5-mu, -sqrt(3/4), 0, 0, 0, 0]' # L5 Lagrange Point
 
 # x0 = [-0.144158380406153	-0.000697738382717277	0	0.0100115754530300	-3.45931892135987	0] # Planar Mirror Orbit "Loop-Dee-Loop" Sub-Trajectory
-# x0 = [1.15568 0 0 0 0.04 0]'
-x0 = np.array([1.16429257222878, -0.0144369085836121, 0, -0.0389308426824481, 0.0153488211249537, 0]) # L2 Lagrange Point Approach
+x0 = np.array([1.0221, 0, -0.1821, 0, -0.1033, 0]) # 9:2 Resonant NRHO (i.e. Gateway orbit)
+# x0 = np.array([1.16429257222878, -0.0144369085836121, 0, -0.0389308426824481, 0.0153488211249537, 0]) # L2 Lagrange Point Approach
 
 # Coordinate system conversions
 dist2km = 384400 # Kilometers per non-dimensionalized distance
@@ -42,8 +53,8 @@ vel2kms = dist2km/(time2hr*60*60) # Kms per non-dimensionalized velocity
 
 # Define time span
 tstamp1 = 0 # For long term trajectories 
-# tstamp = 0.3570
-end_t = 36/time2hr - tstamp1
+end_t = 1.5112 - tstamp1
+tstamp = end_t
 tspan = np.arange(0, end_t, 6.25e-3) # For our modified trajectory 
 
 # Call ode45()
@@ -63,9 +74,10 @@ for i in range(tspan.shape[0]-1):
 
 # tstamp = 40*24/time2hr;
 
+'''
 # Longer-term scheduling
 tstamp = t[-1] # Begin new trajectory where we left off
-end_t = (40*24)/time2hr
+end_t = (50*24)/time2hr
 tspan = np.arange(tstamp[0], end_t, 8/time2hr) # Schedule to take measurements once every 8 hours
 x0_tmp = np.zeros(dx_dt[-1,:].shape)
 x0_tmp[:] = dx_dt[-1,:]
@@ -86,12 +98,13 @@ for i in range(tspan.shape[0]-1):
 
 t = np.hstack((t, ts.reshape(-1)))
 dx_dt = np.vstack((dx_dt, dx_dts))
+'''
 
 rb = dx_dt[:,:3] # Position evolutions from barycenter
 vb = dx_dt[:,3:] # Velocity evolutions from barycenter
 rbe = np.array([[-mu], [0], [0]]) # Position vector relating center of earth to barycenter
 
-# Insert code for obtaining vector between center of Earth and observer
+# Insert code for obtaining vector between center of Earth and observer (Location: College Station, TX)
 
 obs_lat = 30.618963
 obs_lon = -96.339214
@@ -118,7 +131,8 @@ rom = np.zeros(rb.shape) # Observer - Moon Center
 vot = np.zeros(rb.shape) # Observer - Target Velocity
 
 for i in range(rb.shape[0]):
-    t_add_nondim = t[i] - tstamp1 # Time since first point of orbit
+    t_add_nondim = np.squeeze(t[i] - tstamp1) # Time since first point of orbit
+    # print(f"Current Time: {t[i,0]}, Non-dim Time Added: {t_add_nondim}, Type: {type(t_add_nondim)}")
     t_add_dim = t_add_nondim * (4.342) # Conversion to dimensionalized time
     delt_add_dim = t_add_dim - 1/86400 
 
@@ -146,6 +160,9 @@ for i in range(rb.shape[0]):
     rot[i,:] = -reo_nondim[i,:] + (R_z@(-rbe + rb[i,:].reshape(rbe.shape))).reshape(-1)
     rom[i,:] = -reo_nondim[i,:] + (R_z@rem).reshape(-1)
     vot[i,:] = -veo_nondim[i,:] + (R_z@(vb[i,:].reshape(rbe.shape))).reshape(-1) + (dRz_dt@(-rbe + rb[i,:].reshape(rbe.shape))).reshape(-1)
+
+print(f"R_BT: {rb}")
+print(f"R_OT: {rot}")
 
 # Before we obtain AZ and EL quantities, we must convert our
 # observer-target vector into a topocentric frame.
@@ -194,7 +211,7 @@ j = -1
 Rm = 1740/384400 # Nondimensionalized radius of the moon
 
 for i in range(t.shape[0]):
-    if (la.norm(np.cross(rot_topo[i,:], rom_topo[i,:]))/la.norm(rot_topo[i,:]) > Rm and (t[i] <= tstamp or t[i] > (30*24)/time2hr)):
+    if (la.norm(np.cross(rot_topo[i,:], rom_topo[i,:]))/la.norm(rot_topo[i,:]) > Rm and (t[i] <= tstamp or t[i] > (47*24)/time2hr)):
         j += 1
         t_valid.append(t[i])
         rot_valid.append(rot_topo[i,:])
@@ -221,12 +238,46 @@ for i in range(rot_valid.shape[0]):
 # for which EL < 0 is considered invalid and should be discarded
 t_valid = t_valid.reshape([-1, 1])
 full_ts = np.hstack((t_valid.reshape([-1, 1]), Rho, AZ, EL)) # Full augmented time-series vector
-first_msmt = np.where(full_ts[:,0] > 6)[0][0]
+# first_msmt = np.where(full_ts[:,0] > 6)[0][0]
 
 valid_El = np.where(full_ts[:,3] > 0)[0]
 valid_Az = np.where(np.abs(full_ts[:,2]) < 0.5*np.pi)[0]
 partial_ts_ECI = full_ts[valid_El, :]
 
+# Find the times at the beginning and end of each pass (i.e. the critical times)
+i = 1
+interval = full_ts[1,0] - full_ts[0,0]
+cTimes = []
+
+while i < partial_ts_ECI.shape[0]:
+    if partial_ts_ECI[i,0] - partial_ts_ECI[i-1,0] > (interval+1e-11):
+        cTimes.extend([partial_ts_ECI[i-1,0], partial_ts_ECI[i,0]])
+    i = i + 1
+
+print(f"Critical Times: {cTimes}")
+
+# Now, we only extract P consecutive observations per pass
+P = 5 # Number of consecutive observations in a single pass
+q = 2 # Index for keeping track of the passes
+
+eo1 = np.where(np.abs(cTimes[0] - partial_ts_ECI[:,0]) < (interval+1e-11))[0][0]
+partial_ts_po = partial_ts_ECI[0:(eo1+1), :]
+
+# print(f"End of First Pass Index: {eo1+1}, Time: {partial_ts_ECI[eo1+1,0]}")
+
+while (q < len(cTimes)):
+    pass_start = np.where(np.abs(cTimes[q-1] - partial_ts_ECI[:,0]) < (interval+1e-11))[0][0]
+    pass_end = np.where(np.abs(cTimes[q] - partial_ts_ECI[:,0]) < (interval+1e-11))[0][0]
+    obs_pass = partial_ts_ECI[pass_start:(pass_end+1), :]
+    
+    # print(f"Pass Starting Time: {partial_ts_ECI[pass_start,0]}, Pass Ending Time: {partial_ts_ECI[pass_end+1,0]}")
+    consObs = appendObs(obs_pass, P)
+    # print(f"Extracted Pass Shape: {consObs.shape}, Partial_TS_PO Shape: {partial_ts_po.shape}")
+    partial_ts_po = np.vstack((partial_ts_po, consObs))
+    
+    q = q + 2
+
+partial_ts_ECI = np.copy(partial_ts_po)
 
 np.savetxt(save_path + "partial_ts.csv", partial_ts_ECI, delimiter=',', fmt='%f')
 np.savetxt(save_path + "full_ts.csv", np.hstack((t.reshape([-1, 1]), rot_topo)), delimiter=',', fmt='%f')
