@@ -1,1382 +1,334 @@
 % Start the clock
 clear all;
 tic
-save_loc = "D:/PythonProjects/EDP/PGM/ParticleFusionTest/9_26_25_meeting/SingleModeMetrics/Test3a";
-load_loc = "D:/PythonProjects/EDP/PGM/TestOrbits/2Obs/NRHO/TestOrbit2/Agent";
-rng(2, "twister")
-
-cluster_by = "FullState";
-Kn = 8; % Number of clusters (original)
-K = repmat({Kn}, 2, 6); % Number of clusters (changeable)
-Kmax = 8; % Maximum number of clusters (Kmax = 1 for EnKF)
-colors = ["Red", "Blue", "Green", "Magenta", "Cyan", "Yellow", "Black", "#500000", "#bf5700", "#00274c"];
-contourCols = lines(Kmax);
-
-disp_diagnostics = true;
-plot_IOD = true;
-plot_indv_clouds = false;
-plot_comb_clouds = true;
-
-% Number of particles to use in IOD
-L = 10000;
-% Num of observers
-num_agents = 2;
-num_clouds_per_agent = 1;
-num_clouds = num_agents * num_clouds_per_agent;
-num_new_clouds_per_agent = 2;
-
-% combine == 0 : don't fuse; 1 : fuse; =/=0,1 : done fusing 
-fusion_idx = 1;
-fuse_orig_clouds = [false, true]; % First entry reserved for IOD fusion
-time_of_fusion = [0, 50]; % hrs
-cloud_names = ["Original"];
-fusion_types = ["Original", "Simple", "Weight Update"];
-
-% College Station
-obs_lat{1} = 30.618963;%repmat({30.618963}, 1, 1);
-obs_lon{1} = -96.339214;%repmat({-96.339214}, 1, 1);
-% Buenos Aires
-obs_lat{2} = -34.612979;
-obs_lon{2} = -58.453656;
-
-% Load noiseless observation data and other important .mat files
-partial_ts = cell(1, num_agents);
-full_ts = cell(1, num_agents);
-full_vts = cell(1, num_agents);
-for ob = 1:num_agents
-    partial_ts{ob} = load(load_loc + num2str(ob) + "/partial_ts.mat").partial_ts; % Noiseless observation data
-    full_ts{ob} = load(load_loc + num2str(ob) + "/full_ts.mat").full_ts; % Position truth (topocentric frame)
-    full_vts{ob} = load(load_loc + num2str(ob) + "/full_vts.mat").full_vts; % Velocity truth (topocentric frame)
-end
-truth_contained = ones(num_agents, num_clouds_per_agent);
-contained_failure_times = zeros(num_agents, num_clouds_per_agent);
-%partial_ts = csvread("D:/PythonProjects/EDP/PGM_Git/PAR-PGM/partial_ts.csv");
-%full_ts = csvread("D:/PythonProjects/EDP/PGM_Git/PAR-PGM/full_ts.csv");
-%full_vts = csvread("D:/PythonProjects/EDP/PGM_Git/PAR-PGM/full_vts.csv");
-draw_from_idx = 0;
-%bCS_idx = 0;
-% Add observation noise to the observation data as follows:
-% Range - 5% of the current (i.e. noiseless) range
-% Azimuth - 1.5 arc sec (credit: Dr. Utkarsh Ranjan Mishra)
-% Elevation - 1.5 arc sec (credit: Dr. Utkarsh Ranjan Mishra)
-% Note: All above quantities are drawn in a zero-mean Gaussian fashion.
-
-theta_f = 1.5; % Arc-seconds of error covariance
-R_f{1} = 0.25; % Range percentage error covariance
-R_f{2} = 0.25;
-
-% Non-dimensionalization
-dist2km = 384400; % Kilometers per non-dimensionalized distance
-time2hr = 4.342*24; % Hours per non-dimensionalized time
-vel2kms = dist2km/(time2hr*60*60); % Kms per non-dimensionalized velocity
-
-% Limits of the cislunar domain
-low_lim = (2*42164); % Two times the GEO Distance
-up_lim = 550000;
-vel_lim = 42; % Escape velocity of the solar system
-
-noised_obs = cell(1, num_agents);
-interval = cell(1, num_agents);
-cTimes = cell(1, num_agents);
-cVal = cell(1, num_agents);
-pf = cell(1, num_agents);
-hdR = cell(1, num_agents);
-hdR_p = cell(1, num_agents);
-partial_vts = cell(1, num_agents);
-partial_rts = cell(1, num_agents);
-Xot_truth = cell(1, num_agents);
-t_truth = cell(1, num_agents);
-idx_prop = cell(1, num_agents);
-c_prop = cell(1, num_agents);
-Xprop_truth = cell(1, num_agents);
-for ob = 1:num_agents
-    noised_obs{ob} = partial_ts{ob};
-
-
-    R_t = zeros(3*length(noised_obs{ob}(:,1)),1); % We shall diagonalize this later
-    mu_t = zeros(3*length(noised_obs{ob}(:,1)),1);
+for mc_idx = 2:2
+    clear all; close all;
+    rng(mc_idx, "twister")
+    save_loc = "D:/PythonProjects/EDP/PGM/ParticleFusionTest/10_3_25_meeting/DilshadMetrics/Test1/MC_" + num2str(mc_idx);
+    load_loc = "D:/PythonProjects/EDP/PGM/TestOrbits/2Obs/NRHO/TestOrbit2/Agent";
     
-    for i = 1:length(partial_ts{ob}(:,1))
-        mu_t(3*(i-1)+1:3*(i-1)+3, 1) = [partial_ts{ob}(i,2); partial_ts{ob}(i,3); partial_ts{ob}(i,4)];
-        R_t(3*(i-1)+1:3*(i-1)+3, 1) = [(R_f{ob}*partial_ts{ob}(i,2))^2; (theta_f*4.84814e-6)^2; (theta_f*4.84814e-6)^2];
-    end
-
-    R_t = diag(R_t);
-    data_vec = mvnrnd(mu_t, R_t)';
+    cluster_by = "FullState";
+    Kn = 8; % Number of clusters (original)
+    K = repmat({Kn}, 2, 6); % Number of clusters (changeable)
+    Kmax = 8; % Maximum number of clusters (Kmax = 1 for EnKF)
+    colors = ["Red", "Blue", "Green", "Magenta", "Cyan", "Yellow", "Black", "#500000", "#bf5700", "#00274c"];
+    contourCols = lines(Kmax);
     
-    for i = 1:length(noised_obs{ob}(:,1))
-        noised_obs{ob}(i,2:4) = data_vec(3*(i-1)+1:3*(i-1)+3,1);
-        %noised_obs{ob}(i,2) = unifrnd(low_lim, up_lim)/dist2km;
-    % while(noised_obs(i,2) < low_lim/dist2km || noised_obs(i,2) > up_lim/dist2km)
-    %     noised_obs(i,2) = mvnrnd(partial_ts(i,2), (R_f*partial_ts(i,2))^2);
-    % end
-    end
-
-    interval{ob} = noised_obs{ob}(2,1) - partial_ts{ob}(1,1);
-
-    % Extract important time points from the noised_obs variable
-    i = 2;
-    while (i <= length(noised_obs{ob}(:,1)))
-        if (noised_obs{ob}(i,1) - noised_obs{ob}(i-1,1) > (interval{ob}+1e-11))
-            cTimes{ob} = [cTimes{ob}, noised_obs{ob}(i-1,1), noised_obs{ob}(i,1)];
-        end
-        i = i + 1;
-    end
-    
-    largest_diff = noised_obs{ob}(2,1) - noised_obs{ob}(1,1);
-    for j = 2:length(noised_obs{ob}(:,1))
-        if (noised_obs{ob}(j,1) - noised_obs{ob}(j-1,1) > largest_diff+1e-11)
-            largest_diff = noised_obs{ob}(j,1) - noised_obs{ob}(j-1,1);
-            idx_cVal = j-1;
-        end
-    end
-    cVal{ob} = noised_obs{ob}(idx_cVal,1);
-
-    % Extract the first continuous observation track
-    hdo = []; % Matrix for a half day observation
-    hdo(1,:) = noised_obs{ob}(1,:);
-    i = 1;
-    while(noised_obs{ob}(i+1,1) - noised_obs{ob}(i,1) < full_ts{ob}(2,1) + 1e-15) % Add small epsilon due to roundoff error
-        hdo(i,:) = noised_obs{ob}(i+1,:);
-        i = i + 1;
-    end
-    
-    % Convert observation data into [X, Y, Z] data in the topographic frame.
-    
-    hdR{ob} = zeros(length(hdo(:,1)),4); % Convert quantities of hdo to [X, Y, Z]
-    hdR{ob}(:,1) = hdo(:,1); % Timestamp stays the same
-    hdR{ob}(:,2) = hdo(:,2) .* cos(hdo(:,4)) .* cos(hdo(:,3)); % Conversion to X
-    hdR{ob}(:,3) = hdo(:,2) .* cos(hdo(:,4)) .* sin(hdo(:,3)); % Conversion to Y
-    hdR{ob}(:,4) = hdo(:,2) .* sin(hdo(:,4)); % Conversion to Z
-    
-    pf{ob} = 0.5; % A factor between 0 to 1 describing the length of the day to interpolate [x, y]
-    nfit = 4; % Order of polynomial fitting (typically around 3-4)
-    in_len = round(pf{ob} * length(hdR{ob}(:,1))); % Length of interpolation interval
-
-    % Modify interpolation interval length such that you are piecing through
-    % enough points.
-    if (in_len < nfit + 1)
-        in_len = nfit + 1;
-        pf{ob} = in_len/length(hdR{ob}(:,1)); % Modify pf such that it meets minimum condition
-    end
-
-    hdR_p{ob} = hdR{ob}(1:in_len,:); % Matrix for a partial half-day observation
-    
-    % Fit polynomials for X, Y, and Z (Cubic for X, Quadratic for X and Y)
-    coeffs_X = polyfit(hdR_p{ob}(:,1), hdR_p{ob}(:,2), nfit);
-    coeffs_Y = polyfit(hdR_p{ob}(:,1), hdR_p{ob}(:,3), nfit);
-    coeffs_Z = polyfit(hdR_p{ob}(:,1), hdR_p{ob}(:,4), nfit);
-    
-    % Predicted values for X, Y, and Z given the polynomial fits
-    X_fit = polyval(coeffs_X, hdR_p{ob}(:,1));
-    Y_fit = polyval(coeffs_Y, hdR_p{ob}(:,1));
-    Z_fit = polyval(coeffs_Z, hdR_p{ob}(:,1));
-    
-    % Now that you have analytically calculated the coefficients of the fitted
-    % polynomial, use them to obtain values for X_dot, Y_dot, and Z_dot.
-    % 1) Plot the X_dot, Y_dot, and Z_dot values for the time points for the
-    % slides. 
-    % 2) Find a generic way of obtaining and plotting X_dot, Y_dot, and Z_dot
-    % values given some set of [X_coeffs, Y_coeffs, Z_coeffs]. 
-    
-    coeffs_dX = polyDeriv(coeffs_X);
-    coeffs_dY = polyDeriv(coeffs_Y);
-    coeffs_dZ = polyDeriv(coeffs_Z);
-    
-    % Predicted values for Xdot, Ydot, and Zdot given the polynomial fits
-    Xdot_fit = polyval(coeffs_dX, hdR_p{ob}(:,1));
-    Ydot_fit = polyval(coeffs_dY, hdR_p{ob}(:,1));
-    Zdot_fit = polyval(coeffs_dZ, hdR_p{ob}(:,1));
-    
-    partial_vts{ob} = [];
-    partial_rts{ob} = [];
-    j = 1;
-    i = 1;
-    while (j <= length(hdR_p{ob}(:,1)))
-        if(hdR{ob}(j,1) == full_vts{ob}(i,1)) % Matching time index
-            partial_vts{ob}(j,:) = full_vts{ob}(i,:);
-            partial_rts{ob}(j,:) = full_ts{ob}(i,:);
-            j = j + 1;
-        end
-        i = i + 1;
-    end
-
-    Xot_fitted = [X_fit(end,1); Y_fit(end,1); Z_fit(end,1); Xdot_fit(end,1); Ydot_fit(end,1); Zdot_fit(end,1)];
-    Xot_truth{ob} = [partial_rts{ob}(end,2:4), partial_vts{ob}(end,2:4)]';
-
-    t_truth{ob} = partial_rts{ob}(end,1);
-    [idx_prop{ob}, c_prop{ob}] = find(full_ts{ob} == t_truth{ob});
-    Xprop_truth{ob} = [full_ts{ob}(idx_prop{ob}+1,2:4), full_vts{ob}(idx_prop{ob}+1,2:4)]';
-end
-
-Lp = 1*L;
-X0cloud = cell(num_agents, num_clouds_per_agent);
-fig_num = 1;
-for ob = 1:num_agents
-    for cloud = 1:num_clouds_per_agent
-        obs_X0cloud = zeros(L,6);
-        for i = 1:length(obs_X0cloud(:,1))
-            obs_X0cloud(i,:) = stateEstCloud(pf{ob}, nfit, theta_f, R_f{ob}, partial_ts{ob}, (partial_ts{ob}(2,1) - partial_ts{ob}(1,1)) + 1e-15, low_lim, up_lim, load_loc + num2str(ob));
-        end
-        X0cloud{ob, cloud} = enforceCislunarBounds(obs_X0cloud, t_truth{ob}, obs_lat{ob}, obs_lon{ob}, dist2km, vel2kms, low_lim, up_lim, vel_lim);%X0cloud(1:j,:);
-   
-        figure(fig_num);
-        fig_num = fig_num + 1;
-        set(gcf, 'units','normalized','outerposition',[0 0 1 1])
-        subplot(2,3,1)
-        plot(dist2km*X0cloud{ob, cloud}(:,1), dist2km*X0cloud{ob, cloud}(:,2), '.')
-        hold on;
-        plot(dist2km*Xot_truth{ob}(1), dist2km*Xot_truth{ob}(2), 'kx','MarkerSize', 15, 'LineWidth', 3)
-        title('X-Y');
-        xlabel('X (km.)');
-        ylabel('Y (km.)');
-        legend('Estimate','Truth');
-        hold off;
-        
-        subplot(2,3,2)
-        plot(dist2km*X0cloud{ob, cloud}(:,1), dist2km*X0cloud{ob, cloud}(:,3), '.')
-        hold on;
-        plot(dist2km*Xot_truth{ob}(1), dist2km*Xot_truth{ob}(3), 'kx','MarkerSize', 15, 'LineWidth', 3)
-        title('X-Z');
-        xlabel('X (km.)');
-        ylabel('Z (km.)');
-        legend('Estimate','Truth');
-        hold off;
-        
-        subplot(2,3,3)
-        plot(dist2km*X0cloud{ob, cloud}(:,2), dist2km*X0cloud{ob, cloud}(:,3), '.')
-        hold on;
-        plot(dist2km*Xot_truth{ob}(2), dist2km*Xot_truth{ob}(3), 'kx','MarkerSize', 15, 'LineWidth', 3)
-        title('Y-Z');
-        xlabel('Y (km.)');
-        ylabel('Z (km.)');
-        legend('Estimate','Truth');
-        hold off;
-        
-        subplot(2,3,4)
-        plot(vel2kms*X0cloud{ob, cloud}(:,4), vel2kms*X0cloud{ob, cloud}(:,5), '.')
-        hold on;
-        plot(vel2kms*Xot_truth{ob}(4), vel2kms*Xot_truth{ob}(5), 'kx','MarkerSize', 15, 'LineWidth', 3)
-        title('Xdot-Ydot');
-        xlabel('Xdot (km/s)');
-        ylabel('Ydot (km/s)');
-        legend('Estimate','Truth');
-        hold off;
-        
-        subplot(2,3,5)
-        plot(vel2kms*X0cloud{ob, cloud}(:,4), vel2kms*X0cloud{ob, cloud}(:,6), '.')
-        hold on;
-        plot(vel2kms*Xot_truth{ob}(4), vel2kms*Xot_truth{ob}(6), 'kx','MarkerSize', 15, 'LineWidth', 3)
-        title('Xdot-Zdot');
-        xlabel('Xdot (km/s)');
-        ylabel('Zdot (km/s)');
-        legend('Estimate','Truth');
-        hold off;
-        
-        subplot(2,3,6)
-        plot(vel2kms*X0cloud{ob, cloud}(:,5), vel2kms*X0cloud{ob, cloud}(:,6), '.')
-        hold on;
-        plot(vel2kms*Xot_truth{ob}(5), vel2kms*Xot_truth{ob}(6), 'kx','MarkerSize', 15, 'LineWidth', 3)
-        title('Ydot-Zdot');
-        xlabel('Ydot (km/s)');
-        ylabel('Zdot (km/s)');
-        legend('Estimate','Truth');
-        hold off;
-        
-        sg = sprintf('Timestep: %3.4f Hours Obs: %i', [t_truth{ob}*time2hr, ob]);
-        sgtitle(sg);
-        savefig(gcf, "iodCloud_obs_" + num2str(ob) + "_cloud_" + num2str(cloud) + ".fig");
-        saveas(gcf, save_loc + "/Observer" + num2str(ob) + "/iodCloud_cloud_" + num2str(cloud) + ".png", 'png');
-        % saveas(gcf, './Simulations/Different Orbit Simulations/iodCloud.png', 'png');
-    end
-end
-
-%% IOD Fusion
-if(fuse_orig_clouds(fusion_idx) == true)
-    disp("Fusing Clouds")
-    % Convert clouds to Synodic Frame
-    converted_cloud_1 = backConvertSynodic(X0cloud{1, 1}, t_truth{1}, obs_lat{1}, obs_lon{1});
-    converted_cloud_2 = backConvertSynodic(X0cloud{2, 1}, t_truth{2}, obs_lat{2}, obs_lon{2});
-    
-    % Fuse Clouds
-    [p3_simple, ~, weight_update_p3_1, weight_update_p3_2, fusion_bin_edges] = fusionMethods(converted_cloud_1, converted_cloud_2, cluster_by, Kmax, num_agents, Lp, disp_diagnostics, save_loc, dist2km, vel2kms, fusion_idx);
-    
-    % Resample Simple Fusion
-    [p3_idx, p3_K, ~] = cluster(p3_simple, cluster_by, Kmax);
-    [~, p3_mu, p3_P, p3_w, ~] = calcGMMStatistics({p3_simple}, {p3_idx}, 1, 1, {p3_K}, Kmax);
-    p3_resampled = zeros(Lp, length(Xot_truth{ob}));
-    for i = 1:Lp
-        [p3_resampled(i,:), ~] = drawFrom(p3_w{1}, p3_mu, p3_P); 
-    end
-
-    % Convert clouds back to Topo Frame
-    X0cloud{1, num_clouds_per_agent+1} = convertToTopo(p3_resampled, t_truth{1}, obs_lat{1}, obs_lon{1});
-    X0cloud{1, num_clouds_per_agent+2} = convertToTopo(weight_update_p3_1, t_truth{1}, obs_lat{1}, obs_lon{1});
-    X0cloud{2, num_clouds_per_agent+1} = convertToTopo(p3_resampled, t_truth{2}, obs_lat{2}, obs_lon{2});
-    X0cloud{2, num_clouds_per_agent+2} = convertToTopo(weight_update_p3_2, t_truth{2}, obs_lat{2}, obs_lon{2});
-    cloud_names = [cloud_names, sprintf("%s %3.1f", fusion_types(2), t_truth{1}*time2hr), sprintf("%s %3.1f", fusion_types(3), t_truth{1}*time2hr)];
-    
-    % Add space for metrics of new clouds
-    %{
-    for ob = 1:num_agents
-        for new_cloud = num_clouds_per_agent+1:num_clouds_per_agent + num_new_clouds_per_agent
-            ent1{ob, new_cloud} = NaN(size(ent1{ob, 1}));
-            ent2_det_cov_orig{ob, new_cloud} = NaN(size(ent2_det_cov_orig{ob, 1}));
-            ent2_det_cov{ob, new_cloud} = NaN(size(ent2_det_cov{ob, 1}));
-            ent2_diff_ent{ob, new_cloud} = NaN(size(ent2_diff_ent{ob, 1}));
-            ent2_discr_ent{ob, new_cloud} = NaN(size(ent2_discr_ent{ob, 1}));
-            likelihood_metric_state_space{ob, new_cloud} = NaN(size(likelihood_metric_state_space{ob, 1}));
-            likelihood_metric_msmt_space{ob, new_cloud} = NaN(size(likelihood_metric_msmt_space{ob, 1}));
-            mahalanobis{ob, new_cloud} = NaN(size(mahalanobis{ob, 1}));
-            RMSE{ob, new_cloud} = NaN(size(RMSE{ob, 1}));
-            std_dev{ob, new_cloud} = NaN(size(std_dev{ob, 1}));
-            weight_metric{ob, new_cloud} = NaN(size(weight_metric{ob, 1}));
-            num_cluster{ob, new_cloud} = NaN(size(num_cluster{ob, 1}));
-            num_particles{ob, new_cloud} = NaN(size(num_particles{ob, 1}));
-        end
-    end
-    %}
-    num_clouds_per_agent = num_clouds_per_agent + num_new_clouds_per_agent;
-    %fusion_idx = min(size(fuse_orig_clouds, 2), fusion_idx + 1);
-end
-fuse_orig_clouds(fusion_idx) = false;
-fusion_idx = fusion_idx + 1;
-
-%% IOD Plotting
-if (plot_IOD)
-    for ob = 1:num_agents
-        for cloud = 1:num_clouds_per_agent
-            plotting_cloud = X0cloud{ob, cloud};
-            plotting_truth = Xot_truth{ob}';
-            idx = ones(size(plotting_cloud, 1), 1);
-            plotStateSpace(plotting_cloud, ...
-                            plotting_truth, ...
-                            K{ob, cloud}, ...
-                            idx, ...
-                            dist2km, ...
-                            vel2kms, ...
-                            colors, ...
-                            sprintf('IOD: %3.4f Hours Ob: %i', [t_truth{ob}*time2hr, ob]), ...
-                            sprintf('%s/Observer%i/Topo/IOD_cloud_%i.png', save_loc, ob, cloud))
-        
-            plotting_cloud = Topo2ECI(X0cloud{ob, cloud}, t_truth{ob}, obs_lat{ob}, obs_lon{ob});
-            plotting_truth = Topo2ECI(Xot_truth{ob}', t_truth{ob}, obs_lat{ob}, obs_lon{ob});
-            plotStateSpace(plotting_cloud, ...
-                            plotting_truth, ...
-                            K{ob, cloud}, ...
-                            idx, ...
-                            dist2km, ...
-                            vel2kms, ...
-                            colors, ...
-                            sprintf('IOD: %3.4f Hours Ob: %i', [t_truth{ob}*time2hr, ob]), ...
-                            sprintf('%s/Observer%i/ECI/IOD_cloud_%i.png', save_loc, ob, cloud))
-        
-            plotting_cloud = backConvertSynodic(X0cloud{ob, cloud}, t_truth{ob}, obs_lat{ob}, obs_lon{ob});
-            plotting_truth = backConvertSynodic(Xot_truth{ob}', t_truth{ob}, obs_lat{ob}, obs_lon{ob});
-            plotStateSpace(plotting_cloud, ...
-                            plotting_truth, ...
-                            K{ob, cloud}, ...
-                            idx, ...
-                            dist2km, ...
-                            vel2kms, ...
-                            colors, ...
-                            sprintf('IOD: %3.4f Hours Ob: %i', [t_truth{ob}*time2hr, ob]), ...
-                            sprintf('%s/Observer%i/Synodic/IOD_cloud_%i.png', save_loc, ob, cloud))
-        end
-    end
-end
-
-if (plot_IOD)
-    for ob = 1:num_agents
-        plotting_cloud = cell(num_clouds_per_agent);
-        for cloud = 1:num_clouds_per_agent
-            plotting_cloud{cloud} = X0cloud{ob, cloud};
-        end
-        plotting_truth = Xot_truth{ob}';
-        plotStateSpaceCombined(plotting_cloud, ...
-                                plotting_truth, ...
-                                num_clouds_per_agent, ...
-                                dist2km, ...
-                                vel2kms, ...
-                                colors, ...
-                                cloud_names, ...
-                                sprintf('IOD: %3.4f Hours Ob: %i', [t_truth{ob}*time2hr, ob]), ...
-                                sprintf('%s/Observer%i/Topo/Combined/IOD_combined.png', save_loc, ob))
-        
-        plotting_cloud = cell(num_clouds_per_agent);
-        for cloud = 1:num_clouds_per_agent
-            plotting_cloud{cloud} = Topo2ECI(X0cloud{ob, cloud}, t_truth{ob}, obs_lat{ob}, obs_lon{ob});
-        end
-        plotting_truth = Topo2ECI(Xot_truth{ob}', t_truth{ob}, obs_lat{ob}, obs_lon{ob});
-        plotStateSpaceCombined(plotting_cloud, ...
-                                plotting_truth, ...
-                                num_clouds_per_agent, ...
-                                dist2km, ...
-                                vel2kms, ...
-                                colors, ...
-                                cloud_names, ...
-                                sprintf('IOD: %3.4f Hours Ob: %i', [t_truth{ob}*time2hr, ob]), ...
-                                sprintf('%s/Observer%i/ECI/Combined/IOD_combined.png', save_loc, ob))
-    
-        plotting_cloud = cell(num_clouds_per_agent);
-        for cloud = 1:num_clouds_per_agent
-            plotting_cloud{cloud} = backConvertSynodic(X0cloud{ob, cloud}, t_truth{ob}, obs_lat{ob}, obs_lon{ob});
-        end
-        plotting_truth = backConvertSynodic(Xot_truth{ob}', t_truth{ob}, obs_lat{ob}, obs_lon{ob});
-        plotStateSpaceCombined(plotting_cloud, ...
-                                plotting_truth, ...
-                                num_clouds_per_agent, ...
-                                dist2km, ...
-                                vel2kms, ...
-                                colors, ...
-                                cloud_names, ...
-                                sprintf('IOD: %3.4f Hours Ob: %i', [t_truth{ob}*time2hr, ob]), ...
-                                sprintf('%s/Observer%i/Synodic/Combined/IOD_combined.png', save_loc, ob))
-    end
-end
-
-%% Start of PGM Filtering
-
-h = @(x) [atan2(x(2),x(1)); pi/2 - acos(x(3)/sqrt(x(1)^2 + x(2)^2 + x(3)^2))]; % Nonlinear measurement model
-t_int = cell(1, num_agents);
-Xm_cloud = X0cloud;
-%Xbt = zeros(L, 6);
-%X_all = cell(length(X0cloud(:,1)), 1);
-%T_all = cell(length(X0cloud(:,1)), 1);
-%Xm_bt = zeros(size(X0cloud));
-for ob = 1:num_agents
-    t_int{ob} = hdR_p{ob}(end,1); % Time at which we are obtaining a state cloud
-    for cloud = 1:num_clouds_per_agent
-        Xm_bt = zeros(size(Xm_cloud{ob, cloud}));
-        Xbt = backConvertSynodic(X0cloud{ob, cloud}, t_int{ob}, obs_lat{ob}, obs_lon{ob});
-        for particle = 1:length(X0cloud{ob, cloud}(:,1))
-            % First, convert from X_{ot} in the topocentric frame to X_{bt} in the
-            % synodic frame.
-            %Xbt = backConvertSynodic(X0cloud{ob, cloud}(i,:)', t_int{ob}, obs_lat{ob}, obs_lon{ob});
-            % Next, propagate each X_{bt} in your particle cloud by a single time 
-            % step and convert back to the topographic frame.
-             % Call ode45()
-            opts = odeset('Events', @termSat);
-            [t,X] = ode45(@cr3bp_dyn, [0 interval{ob}], Xbt(particle, :), opts); % Assumes termination event (i.e. target enters LEO)
-            Xm_bt(particle, :) = X(end,:);
-            % Xm_cloud(i,:) = procNoise(Xm_cloud(i,:)); % Adds process noise
-        end
-        Xm_cloud_tmp = convertToTopo(Xm_bt, t_int{ob} + interval{ob}, obs_lat{ob}, obs_lon{ob});
-        Xm_cloud{ob, cloud} = enforceCislunarBounds(Xm_cloud_tmp, t_int{ob} + interval{ob}, obs_lat{ob}, obs_lon{ob}, dist2km, vel2kms, low_lim, up_lim, vel_lim);
-    end
-end
-% Initialize variables
-idx = cell(num_agents, num_clouds_per_agent);
-
-for ob = 1:num_agents
-    for cloud = 1:num_clouds_per_agent
-        [idx{ob, cloud}, K{ob, cloud}, ~] = cluster(Xm_cloud{ob, cloud}, cluster_by, K{ob, cloud});
-    end
-end
-
-[cPoints, mu_c, P_c, wm, ~] = calcGMMStatistics(Xm_cloud, idx, num_agents, num_clouds_per_agent, K, Kmax);
-
-% Plot the results
-warning('off', 'MATLAB:legend:IgnoringExtraEntries');
-
-% Plot planar projections
-%{
-figure(2)
-subplot(2,1,1)
-hold on;
-for k = 1:K
-    clusterPoints = Xm_cloud(idx == k, :);
-    scatter3(dist2km*clusterPoints(:,1), dist2km*clusterPoints(:,2), dist2km*clusterPoints(:,3), 'filled', 'MarkerFaceColor', colors(k));
-    hold on;
-end
-plot3(dist2km*Xprop_truth(1), dist2km*Xprop_truth(2), dist2km*Xprop_truth(3), 'x','MarkerSize', 15, 'LineWidth', 3)
-title('k-Means Clustered Distribution (Position)');
-xlabel('X (km.)');
-ylabel('Y (km.)');
-zlabel('Z (km.)');
-
-legend_string = {};
-parfor k = 1:K
-    legend_string{k} = sprintf('\\omega = %1.4f', wm(k));
-end
-% legend_string{K+1} = "Centroids";
-legend_string{K+1} = "Truth";
-legend(legend_string);
-grid on;
-view(3);
-hold off;
-
-subplot(2,1,2)
-hold on;
-for k = 1:K
-    clusterPoints = Xm_cloud(idx == k, :);
-    scatter3(vel2kms*clusterPoints(:,4), vel2kms*clusterPoints(:,5), vel2kms*clusterPoints(:,6), 'filled', 'MarkerFaceColor', colors(k));
-    hold on;
-end
-plot3(vel2kms*Xprop_truth(4), vel2kms*Xprop_truth(5), vel2kms*Xprop_truth(6), 'x','MarkerSize', 15, 'LineWidth', 3)
-title('k-Means Clustered Distribution (Velocity)');
-xlabel('Vx (km/s)');
-ylabel('Vy (km/s)');
-zlabel('Vz (km/s)');
-legend(legend_string);
-grid on;
-view(3);
-hold off;
-%}
-legend_string = "Truth";
-for ob = 1:num_agents
-    for cloud = 1:num_clouds_per_agent
-        % Plot planar projections
-        figure(fig_num)
-        fig_num = fig_num + 1;
-        set(gcf, 'units','normalized','outerposition',[0 0 1 1])
-        subplot(2,3,1)
-        for k = 1:K{ob, cloud}
-            clusterPoints = Xm_cloud{ob, cloud}(idx{ob, cloud} == k, :);
-            scatter(dist2km*clusterPoints(:,1), dist2km*clusterPoints(:,2), 'filled', ...
-                'HandleVisibility', 'off', 'MarkerFaceColor', colors(k));
-            hold on;
-        end
-        % plot(dist2km*C_unorm(:,1), dist2km*C_unorm(:,2), '+', 'MarkerSize', 10, 'LineWidth', 3);
-        % hold on;
-        plot(dist2km*Xprop_truth{ob}(1), dist2km*Xprop_truth{ob}(2), 'kx','MarkerSize', 15, 'LineWidth', 3)
-        title('X-Y');
-        xlabel('X (km.)');
-        ylabel('Y (km.)');
-        legend(legend_string);
-        hold off;
-        
-        subplot(2,3,2)
-        for k = 1:K{ob, cloud}
-            clusterPoints = Xm_cloud{ob, cloud}(idx{ob, cloud} == k, :);
-            scatter(dist2km*clusterPoints(:,1), dist2km*clusterPoints(:,3), 'filled', ...
-                'HandleVisibility', 'off', 'MarkerFaceColor', colors(k));
-            hold on;
-        end
-        % plot(dist2km*C_unorm(:,1), dist2km*C_unorm(:,3), '+', 'MarkerSize', 10, 'LineWidth', 3);
-        % hold on;
-        plot(dist2km*Xprop_truth{ob}(1), dist2km*Xprop_truth{ob}(3), 'kx','MarkerSize', 15, 'LineWidth', 3)
-        title('X-Z');
-        xlabel('X (km.)');
-        ylabel('Z (km.)');
-        legend(legend_string);
-        hold off;
-        
-        subplot(2,3,3)
-        for k = 1:K{ob, cloud}
-            clusterPoints = Xm_cloud{ob, cloud}(idx{ob, cloud} == k, :);
-            scatter(dist2km*clusterPoints(:,2), dist2km*clusterPoints(:,3), 'filled', ...
-                'HandleVisibility', 'off', 'MarkerFaceColor', colors(k));
-            hold on;
-        end
-        % plot(dist2km*C_unorm(:,2), dist2km*C_unorm(:,3), '+', 'MarkerSize', 10, 'LineWidth', 3);
-        % hold on;
-        plot(dist2km*Xprop_truth{ob}(2), dist2km*Xprop_truth{ob}(3), 'kx','MarkerSize', 15, 'LineWidth', 3)
-        title('Y-Z');
-        xlabel('Y (km.)');
-        ylabel('Z (km.)');
-        legend(legend_string);
-        hold off;
-        
-        subplot(2,3,4)
-        for k = 1:K{ob, cloud}
-            clusterPoints = Xm_cloud{ob, cloud}(idx{ob, cloud} == k, :);
-            scatter(vel2kms*clusterPoints(:,4), vel2kms*clusterPoints(:,5), 'filled', ...
-                'HandleVisibility', 'off', 'MarkerFaceColor', colors(k));
-            hold on;
-        end
-        % plot(vel2kms*C_unorm(:,4), vel2kms*C_unorm(:,5), '+', 'MarkerSize', 10, 'LineWidth', 3);
-        % hold on;
-        plot(vel2kms*Xprop_truth{ob}(4), vel2kms*Xprop_truth{ob}(5), 'kx','MarkerSize', 15, 'LineWidth', 3)
-        title('Xdot-Ydot');
-        xlabel('Xdot (km/s)');
-        ylabel('Ydot (km/s)');
-        legend(legend_string);
-        hold off;
-        
-        subplot(2,3,5)
-        for k = 1:K{ob, cloud}
-            clusterPoints = Xm_cloud{ob, cloud}(idx{ob, cloud} == k, :);
-            scatter(vel2kms*clusterPoints(:,4), vel2kms*clusterPoints(:,6), 'filled', 'MarkerFaceColor', colors(k));
-            hold on;
-        end
-        % plot(vel2kms*C_unorm(:,4), vel2kms*C_unorm(:,6), '+', 'MarkerSize', 10, 'LineWidth', 3);
-        % hold on;
-        plot(vel2kms*Xprop_truth{ob}(4), vel2kms*Xprop_truth{ob}(6), 'kx','MarkerSize', 15, 'LineWidth', 3)
-        title('Xdot-Zdot');
-        xlabel('Xdot (km/s)');
-        ylabel('Zdot (km/s)');
-        legend(legend_string);
-        hold off;
-        
-        subplot(2,3,6)
-        for k = 1:K{ob, cloud}
-            clusterPoints = Xm_cloud{ob, cloud}(idx{ob, cloud} == k, :);
-            scatter(vel2kms*clusterPoints(:,5), vel2kms*clusterPoints(:,6), 'filled', ...
-                'HandleVisibility', 'off', 'MarkerFaceColor', colors(k));
-            hold on;
-        end
-        % plot(vel2kms*C_unorm(:,5), vel2kms*C_unorm(:,6), '+', 'MarkerSize', 10, 'LineWidth', 3, 'HandleVisibility', 'off');
-        % hold on;
-        plot(vel2kms*Xprop_truth{ob}(5), vel2kms*Xprop_truth{ob}(6), 'kx','MarkerSize', 15, 'LineWidth', 3)
-        title('Ydot-Zdot');
-        xlabel('Ydot (km/s)');
-        ylabel('Zdot (km/s)');
-        legend(legend_string);
-        hold off;
-        
-        sg = sprintf('Timestep: %3.4f Hours (Prior) Obs: %i', [time2hr*full_ts{ob}(idx_prop{ob}+1,1), ob]);
-        sgtitle(sg);
-        saveas(gcf, save_loc + "/Observer" + num2str(ob) + "/Timestep_0_1B_cloud_" + num2str(cloud) + ".png", 'png');
-        % saveas(gcf, './Simulations/Different Orbit Simulations/Timestep_0_1B', 'png');
-        Xprop_truth{ob} = [full_ts{ob}(idx_prop{ob}+1,2:4), full_vts{ob}(idx_prop{ob}+1,2:4)];
-        fprintf('Truth State: \n');
-        disp(Xprop_truth{ob});
-    end
-end
-
-% Now that we have a GMM representing the prior distribution, we have to
-% use a Kalman update for each component: weight, mean, and covariance.
-
-% Posterior variables
-wp = wm;
-mu_p = mu_c;
-P_p = P_c;
-
-% Comment this out if you wish to use noise.
-% noised_obs = partial_ts;
-tpr = cell(1, num_agents);
-idx_meas = cell(1, num_agents);
-Xp_cloud = Xm_cloud;
-zt = cell(1, num_agents);
-for ob = 1:num_agents
-    tpr{ob} = t_int{ob} + interval{ob}; % Time stamp of the prior means, weights, and covariances
-    [idx_meas{ob}, ~] = find(abs(noised_obs{ob}(:,1) - tpr{ob}) < 1e-10); % Find row with time
-    
-    if (idx_meas{ob} ~= 0) % i.e. there exists a measurement
-        R_vv = [theta_f*pi/648000, 0; 0, theta_f*pi/648000].^2;
-        zt{ob} = getNoisyMeas(Xprop_truth{ob}, R_vv, h);
-    end
-    for cloud = 1:num_clouds_per_agent
-        if (idx_meas{ob} ~= 0) % i.e. there exists a measurement
-            for k = 1:K{ob, cloud}
-                % [mu_p{i}, P_p{i}] = ukfUpdate(zt, R_vv, mu_c{i}, P_c{i}, h);
-                [mu_p{ob, cloud, k}, P_p{ob, cloud, k}] = kalmanUpdate(zt{ob}, cPoints{ob, cloud, k}, R_vv, mu_c{ob, cloud, k}, P_c{ob, cloud, k}, h);
-            end
-        
-            % Weight update
-            wp{ob, cloud} = weightUpdate(wm{ob, cloud}, Xm_cloud{ob, cloud}, idx{ob, cloud}, zt{ob}, R_vv, h);
-        
-        else
-            for k = 1:K{ob, cloud}
-                wp{ob, cloud}(k) = wm{ob, cloud}(k);
-                mu_p{ob, cloud, k} = mu_c{ob, cloud, k};
-                P_p{ob, cloud, k} = P_c{ob, cloud, k};
-            end
-        end
-        
-        Lp = 8000;
-        c_id = zeros(length(Xp_cloud{ob, cloud}(:,1)),1);
-        for i = 1:L
-            [Xp_cloud{ob, cloud}(i,:), c_id(i)] = drawFrom(wp{ob, cloud}, mu_p(ob, cloud, :), P_p(ob, cloud, :)); 
-        end
-    
-        mu_pExp = zeros(K{ob, cloud}, 6);
-        %%save("./Outside2/Xp_cloud_Outside.mat", "Xp_cloud")
-        aa = zeros(3);
-        % Plot the results
-        figure(fig_num)
-        fig_num = fig_num + 1;
-        subplot(2,1,1)
-        hold on;
-        for k = 1:K{ob, cloud}
-            clusterPoints = Xp_cloud{ob, cloud}(c_id == k, :);
-            mu_pExp(k,:) = mu_p{ob, cloud, k};
-            scatter3(dist2km*clusterPoints(:,1), dist2km*clusterPoints(:,2), dist2km*clusterPoints(:,3), 'filled', 'MarkerFaceColor', colors(k));
-            hold on;
-        end
-        plot3(dist2km*mu_pExp(:,1), dist2km*mu_pExp(:,2), dist2km*mu_pExp(:,3), 'k+', 'MarkerSize', 10, 'LineWidth', 3);
-        hold on;
-        plot3(dist2km*Xprop_truth{ob}(1), dist2km*Xprop_truth{ob}(2), dist2km*Xprop_truth{ob}(3), 'x','MarkerSize', 20, 'LineWidth', 3)
-        title('Posterior Distribution (Position)');
-        xlabel('X (km.)');
-        ylabel('Y (km.)');
-        zlabel('Z (km.)');
-        legend(legend_string);
-        grid on;
-        view(3);
-        hold off;
-        
-        subplot(2,1,2)
-        hold on;
-        for k = 1:K{ob, cloud}
-            clusterPoints = Xp_cloud{ob, cloud}(c_id == k, :);
-            scatter3(vel2kms*clusterPoints(:,4), vel2kms*clusterPoints(:,5), vel2kms*clusterPoints(:,6), 'filled', 'MarkerFaceColor', colors(k));
-            hold on;
-        end
-        plot3(vel2kms*mu_pExp(:,4), vel2kms*mu_pExp(:,5), vel2kms*mu_pExp(:,6), 'k+', 'MarkerSize', 10, 'LineWidth', 3);
-        hold on;
-        plot3(vel2kms*Xprop_truth{ob}(4), vel2kms*Xprop_truth{ob}(5), vel2kms*Xprop_truth{ob}(6), 'x','MarkerSize', 20, 'LineWidth', 3)
-        title('Posterior Distribution (Velocity)');
-        xlabel('Vx (km/s)');
-        ylabel('Vy (km/s)');
-        zlabel('Vz (km/s)');
-        legend(legend_string);
-        grid on;
-        view(3);
-        hold off;
-        
-        legend_string = "Truth";
-        
-        % Plot planar projections
-        figure(4)
-        set(gcf, 'units','normalized','outerposition',[0 0 1 1])
-        subplot(2,3,1)
-        for k = 1:K{ob, cloud}
-            clusterPoints = Xp_cloud{ob, cloud}(c_id == k, :);
-            mu_pExp(k,:) = mu_p{ob, cloud, k};
-            scatter(dist2km*clusterPoints(:,1), dist2km*clusterPoints(:,2), 'filled', ...
-                'HandleVisibility', 'off', 'MarkerFaceColor', colors(k));
-            hold on;
-        end
-        plot(dist2km*Xprop_truth{ob}(1), dist2km*Xprop_truth{ob}(2), 'kx','MarkerSize', 20, 'LineWidth', 3)
-        title('X-Y');
-        xlabel('X (km.)');
-        ylabel('Y (km.)');
-        legend(legend_string);
-        hold off;
-        
-        subplot(2,3,2)
-        for k = 1:K{ob, cloud}
-            clusterPoints = Xp_cloud{ob, cloud}(c_id == k, :);
-            mu_pExp(k,:) = mu_p{ob, cloud, k};
-            scatter(dist2km*clusterPoints(:,1), dist2km*clusterPoints(:,3), 'filled', ...
-                'HandleVisibility', 'off', 'MarkerFaceColor', colors(k));
-            hold on;
-        end
-        plot(dist2km*Xprop_truth{ob}(1), dist2km*Xprop_truth{ob}(3), 'kx','MarkerSize', 20, 'LineWidth', 3)
-        title('X-Z');
-        xlabel('X (km.)');
-        ylabel('Z (km.)');
-        legend(legend_string);
-        hold off;
-        
-        subplot(2,3,3)
-        for k = 1:K{ob, cloud}
-            clusterPoints = Xp_cloud{ob, cloud}(c_id == k, :);
-            mu_pExp(k,:) = mu_p{ob, cloud, k};
-            scatter(dist2km*clusterPoints(:,2), dist2km*clusterPoints(:,3), 'filled', ...
-                'HandleVisibility', 'off', 'MarkerFaceColor', colors(k));
-            hold on;
-        end
-        plot(dist2km*Xprop_truth{ob}(2), dist2km*Xprop_truth{ob}(3), 'kx','MarkerSize', 20, 'LineWidth', 3)
-        title('Y-Z');
-        xlabel('Y (km.)');
-        ylabel('Z (km.)');
-        legend(legend_string);
-        hold off;
-        
-        subplot(2,3,4)
-        for k = 1:K{ob, cloud}
-            clusterPoints = Xp_cloud{ob, cloud}(c_id == k, :);
-            mu_pExp(k,:) = mu_p{ob, cloud, k};
-            scatter(vel2kms*clusterPoints(:,4), vel2kms*clusterPoints(:,5), 'filled', ... 
-                'HandleVisibility', 'off', 'MarkerFaceColor', colors(k));
-            hold on;
-        end
-        % plot(vel2kms*mu_pExp(:,4), vel2kms*mu_pExp(:,5), 'k+', 'MarkerSize', 10, 'LineWidth', 3);
-        % hold on;
-        plot(vel2kms*Xprop_truth{ob}(4), vel2kms*Xprop_truth{ob}(5), 'kx','MarkerSize', 20, 'LineWidth', 3)
-        title('Xdot-Ydot');
-        xlabel('Xdot (km/s)');
-        ylabel('Ydot (km/s)');
-        legend(legend_string);
-        hold off;
-        
-        subplot(2,3,5)
-        for k = 1:K{ob, cloud}
-            clusterPoints = Xp_cloud{ob, cloud}(c_id == k, :);
-            mu_pExp(k,:) = mu_p{ob, cloud, k};
-            scatter(vel2kms*clusterPoints(:,4), vel2kms*clusterPoints(:,6), 'filled', ...
-                'HandleVisibility', 'off', 'MarkerFaceColor', colors(k));
-            hold on;
-        end
-        % plot(vel2kms*mu_pExp(:,4), vel2kms*mu_pExp(:,6), 'k+', 'MarkerSize', 10, 'LineWidth', 3);
-        % hold on;
-        plot(vel2kms*Xprop_truth{ob}(4), vel2kms*Xprop_truth{ob}(6), 'kx','MarkerSize', 20, 'LineWidth', 3)
-        title('Xdot-Zdot');
-        xlabel('Xdot (km/s)');
-        ylabel('Zdot (km/s)');
-        legend(legend_string);
-        hold off;
-        
-        subplot(2,3,6)
-        for k = 1:K{ob, cloud}
-            clusterPoints = Xp_cloud{ob, cloud}(c_id == k, :);
-            mu_pExp(k,:) = mu_p{ob, cloud, k};
-            scatter(vel2kms*clusterPoints(:,5), vel2kms*clusterPoints(:,6), 'filled', ...
-                'HandleVisibility', 'off', 'MarkerFaceColor', colors(k));
-            hold on;
-        end
-        % plot(vel2kms*mu_pExp(:,5), vel2kms*mu_pExp(:,6), 'k+', 'MarkerSize', 10, 'LineWidth', 3);
-        % hold on;
-        plot(vel2kms*Xprop_truth{ob}(5), vel2kms*Xprop_truth{ob}(6), 'kx','MarkerSize', 20, 'LineWidth', 3)
-        title('Ydot-Zdot');
-        xlabel('Ydot (km/s)');
-        ylabel('Zdot (km/s)');
-        legend(legend_string);
-        hold off;
-        
-        sg = sprintf('Timestep: %3.4f Hours (Posterior) Obs: %i', [time2hr*noised_obs{ob}(idx_meas{ob},1), ob]);
-        sgtitle(sg);
-        saveas(gcf,save_loc + '/Observer' + num2str(ob) + '/Timestep_0_2B_cloud_' + num2str(cloud) + '.png', 'png')
-        % saveas(gcf,'./Simulations/Different Orbit Simulations/Timestep_0_2B.png', 'png')
-    end
-end
-
-% At this point, we have shown a PGM-I propagation and update step. The
-% next step is to utilize this PGM-I update across all time steps during
-% which the target is within our sensor FOV and see how the particle clouds
-% (i.e. GM components) evolve over time. If we're lucky, we should see that
-% the GMM tracks the truth over the interval.
-
-% Find and set the start and end times to simulation
-idx_meas = cell(1, num_agents);
-c_meas = cell(1, num_agents);
-%idx_crit = cell(1, num_agents);
-t_end = cell(1, num_agents);
-idx_end = cell(1, num_agents);
-idx_start = cell(1, num_agents);
-l_filt = cell(1, num_agents);
-for ob = 1:num_agents
-    [idx_meas{ob}, c_meas{ob}] = find(abs(hdR{ob}(:,1) - tpr{ob}) < 1e-10);
-    interval{ob} = hdR{ob}(idx_meas{ob},c_meas{ob}) - hdR{ob}(idx_meas{ob}-1,c_meas{ob});
-
-    %[idx_crit{ob}, ~] = find(abs(full_ts{ob}(:,1)) >= (28*24)/time2hr, 1, 'first'); % Find the index of the last time step before a certain number of days have passed since orbit propagation
-    t_end{ob} = full_ts{ob}(end,1); % First observation of new pass + one more time step
-    
-    tau = 0;
-    [idx_end{ob}, ~] = find(abs(full_ts{ob}(:,1) - t_end{ob}) < 1e-10);
-    [idx_start{ob}, ~] = find(abs(full_ts{ob}(:,1) - tpr{ob}) < 1e-10);
-    
-    l_filt{ob} = length(full_ts{ob}(idx_start{ob}:idx_end{ob},1))+1;
-end
-
-likelihood_metric_state_space = cell(num_agents, num_clouds_per_agent);
-likelihood_metric_msmt_space = cell(num_agents, num_clouds_per_agent);
-ent2_det_cov_orig = cell(num_agents, num_clouds_per_agent);
-ent2_det_cov = cell(num_agents, num_clouds_per_agent);
-ent2_diff_ent = cell(num_agents, num_clouds_per_agent);
-ent2_discr_ent = cell(num_agents, num_clouds_per_agent);
-ent1 = cell(num_agents, num_clouds_per_agent);
-mahalanobis = cell(num_agents, num_clouds_per_agent);
-RMSE = cell(num_agents, num_clouds_per_agent);
-std_dev = cell(num_agents, num_clouds_per_agent);
-mat_weight_metric = cell(num_agents, num_clouds_per_agent);
-orig_weight_metric = cell(num_agents, num_clouds_per_agent);
-num_cluster = cell(num_agents, num_clouds_per_agent);
-num_particles = cell(num_agents, num_clouds_per_agent);
-for ob = 1:num_agents
-    for cloud = 1:num_clouds_per_agent
-        likelihood_metric_state_space{ob, cloud} = zeros(l_filt{ob},1);
-        likelihood_metric_msmt_space{ob, cloud} = zeros(l_filt{ob},1);
-        ent2_det_cov_orig{ob, cloud} = zeros(l_filt{ob},1);
-        ent2_det_cov{ob, cloud} = zeros(l_filt{ob},1);
-        ent2_diff_ent{ob, cloud} = zeros(l_filt{ob},1);
-        ent2_discr_ent{ob, cloud} = zeros(l_filt{ob},1);
-        ent1{ob, cloud} = zeros(l_filt{ob},length(mu_c{ob, cloud, 1})); 
-        mahalanobis{ob, cloud} = zeros(l_filt{ob}, 1);
-        RMSE{ob, cloud} = zeros(l_filt{ob}, 6);
-        std_dev{ob, cloud} = zeros(l_filt{ob}, 6);
-        mat_weight_metric{ob, cloud} = zeros(l_filt{ob}, 3);
-        orig_weight_metric{ob, cloud} = zeros(l_filt{ob}, 3);
-        num_cluster{ob, cloud} = zeros(l_filt{ob}, 1);
-        num_particles{ob, cloud} = zeros(l_filt{ob}, 1);
-
-        metric_cloud = Topo2ECI(X0cloud{ob, cloud}, tpr{ob}, obs_lat{ob}, obs_lon{ob});
-        metric_truth = Topo2ECI(Xot_truth{ob}', tpr{ob}, obs_lat{ob}, obs_lon{ob});
-
-        %[truth_contained(ob, cloud), contained_failure_times(ob, cloud)] = checkIfInside(metric_cloud, metric_truth, 1);
-        [likelihood_metric_state_space{ob, cloud}(1), ent2_det_cov_orig{ob, cloud}(1), ent2_det_cov{ob, cloud}(1), ent2_diff_ent{ob, cloud}(1), ent2_discr_ent{ob, cloud}(1), mahalanobis{ob, cloud}(1), RMSE{ob, cloud}(1, :), std_dev{ob, cloud}(1, :), mat_weight_metric{ob, cloud}(1, :), num_cluster{ob, cloud}(1), num_particles{ob, cloud}(1)] = getStateSpaceMetrics(1, metric_cloud, metric_truth, cluster_by);
-        
-        metric_cloud = Topo2ECI(Xp_cloud{ob, cloud}, tpr{ob}, obs_lat{ob}, obs_lon{ob});
-        metric_truth = Topo2ECI(Xprop_truth{ob}, tpr{ob}, obs_lat{ob}, obs_lon{ob});
-
-        %[truth_contained(ob, cloud), contained_failure_times(ob, cloud)] = checkIfInside(metric_cloud, metric_truth, 2);
-        [likelihood_metric_state_space{ob, cloud}(2), ent2_det_cov_orig{ob, cloud}(2), ent2_det_cov{ob, cloud}(2), ent2_diff_ent{ob, cloud}(2), ent2_discr_ent{ob, cloud}(2), mahalanobis{ob, cloud}(2), RMSE{ob, cloud}(2, :), std_dev{ob, cloud}(2, :), mat_weight_metric{ob, cloud}(2, :), num_cluster{ob, cloud}(2), num_particles{ob, cloud}(2)] = getStateSpaceMetrics(K{ob, cloud}, metric_cloud, metric_truth, cluster_by);%log(det(cov(Xp_cloud)));
-        ent1{ob, cloud}(1,:) = getDiagCov(X0cloud{ob, cloud});
-    end
-end
-Xp_cloudp = Xp_cloud;
-
-% for to = tpr:interval:(t_end-1e-11) % Looping over the times of observation for easier propagation
-for ts = min(idx_start{:}):(max(idx_end{:})-1)
+    disp_diagnostics = true;
+    plot_IOD = true;
     plot_indv_clouds = false;
-    if ((tau >= time_of_fusion(1)-3) && (tau <= time_of_fusion(1)+3))
-        plot_indv_clouds = true;
+    plot_comb_clouds = false;
+    save_MC_metrics = true;
+    
+    % Number of particles to use in IOD
+    L = 10000;
+    % Num of observers
+    num_agents = 2;
+    num_clouds_per_agent = 1;
+    num_clouds = num_agents * num_clouds_per_agent;
+    num_new_clouds_per_agent = 2;
+    
+    % combine == 0 : don't fuse; 1 : fuse; =/=0,1 : done fusing 
+    fusion_idx = 1;
+    fuse_orig_clouds = [false, true]; % First entry reserved for IOD fusion
+    time_of_fusion = [0, 50]; % hrs
+    cloud_names = ["Original"];
+    fusion_types = ["Original", "Simple", "Weight Update"];
+    
+    % College Station
+    obs_lat{1} = 30.618963;%repmat({30.618963}, 1, 1);
+    obs_lon{1} = -96.339214;%repmat({-96.339214}, 1, 1);
+    % Buenos Aires
+    obs_lat{2} = -34.612979;
+    obs_lon{2} = -58.453656;
+    
+    % Create Folders
+    for ob = 1:num_agents
+        ensureDirExists(sprintf('%s/Observer%i/Topo/Combined/', save_loc, ob));
+        ensureDirExists(sprintf('%s/Observer%i/Synodic/Combined/', save_loc, ob));
+        ensureDirExists(sprintf('%s/Observer%i/ECI/Combined/', save_loc, ob));
     end
-    if ((tau >= time_of_fusion(2)-3) && (tau <= time_of_fusion(2)+3))
-        plot_indv_clouds = true;
+    %ensureDirExists('%s/MC_%i/', save_loc, MC_idx);
+    
+    % Load noiseless observation data and other important .mat files
+    partial_ts = cell(1, num_agents);
+    full_ts = cell(1, num_agents);
+    full_vts = cell(1, num_agents);
+    for ob = 1:num_agents
+        partial_ts{ob} = load(load_loc + num2str(ob) + "/partial_ts.mat").partial_ts; % Noiseless observation data
+        full_ts{ob} = load(load_loc + num2str(ob) + "/full_ts.mat").full_ts; % Position truth (topocentric frame)
+        full_vts{ob} = load(load_loc + num2str(ob) + "/full_vts.mat").full_vts; % Velocity truth (topocentric frame)
     end
-    Xm_cloud = cell(num_agents, num_clouds_per_agent);
+    truth_contained = ones(num_agents, num_clouds_per_agent);
+    contained_failure_times = zeros(num_agents, num_clouds_per_agent);
+    %partial_ts = csvread("D:/PythonProjects/EDP/PGM_Git/PAR-PGM/partial_ts.csv");
+    %full_ts = csvread("D:/PythonProjects/EDP/PGM_Git/PAR-PGM/full_ts.csv");
+    %full_vts = csvread("D:/PythonProjects/EDP/PGM_Git/PAR-PGM/full_vts.csv");
+    draw_from_idx = 0;
+    %bCS_idx = 0;
+    % Add observation noise to the observation data as follows:
+    % Range - 5% of the current (i.e. noiseless) range
+    % Azimuth - 1.5 arc sec (credit: Dr. Utkarsh Ranjan Mishra)
+    % Elevation - 1.5 arc sec (credit: Dr. Utkarsh Ranjan Mishra)
+    % Note: All above quantities are drawn in a zero-mean Gaussian fashion.
+    
+    theta_f = 1.5; % Arc-seconds of error covariance
+    R_f{1} = 0.25; % Range percentage error covariance
+    R_f{2} = 0.25;
+    
+    % Non-dimensionalization
+    dist2km = 384400; % Kilometers per non-dimensionalized distance
+    time2hr = 4.342*24; % Hours per non-dimensionalized time
+    vel2kms = dist2km/(time2hr*60*60); % Kms per non-dimensionalized velocity
+    
+    % Limits of the cislunar domain
+    low_lim = (2*42164); % Two times the GEO Distance
+    up_lim = 550000;
+    vel_lim = 42; % Escape velocity of the solar system
+    
+    noised_obs = cell(1, num_agents);
     interval = cell(1, num_agents);
-    for ob=1:num_agents
-        to = full_ts{ob}(ts,1);
-        interval{ob} = full_ts{ob}(ts+1,1) - to;
-        for cloud = 1:num_clouds_per_agent
-            %if (truth_contained(ob, cloud) == 1)
-            ent1{ob, cloud}(tau+2,:) = getDiagCov(Xp_cloudp{ob, cloud});
+    cTimes = cell(1, num_agents);
+    cVal = cell(1, num_agents);
+    pf = cell(1, num_agents);
+    hdR = cell(1, num_agents);
+    hdR_p = cell(1, num_agents);
+    partial_vts = cell(1, num_agents);
+    partial_rts = cell(1, num_agents);
+    Xot_truth = cell(1, num_agents);
+    t_truth = cell(1, num_agents);
+    idx_prop = cell(1, num_agents);
+    c_prop = cell(1, num_agents);
+    Xprop_truth = cell(1, num_agents);
+    for ob = 1:num_agents
+        noised_obs{ob} = partial_ts{ob};
+    
+    
+        R_t = zeros(3*length(noised_obs{ob}(:,1)),1); % We shall diagonalize this later
+        mu_t = zeros(3*length(noised_obs{ob}(:,1)),1);
         
-            % Propagation Step
-            Xm_cloud_tmp = propagate(Xp_cloudp{ob, cloud}, to, interval{ob}, obs_lat{ob}, obs_lon{ob});
-            Xm_cloud{ob, cloud} = enforceCislunarBounds(Xm_cloud_tmp, to + interval{ob}, obs_lat{ob}, obs_lon{ob}, dist2km, vel2kms, low_lim, up_lim, vel_lim);
-            %end
+        for i = 1:length(partial_ts{ob}(:,1))
+            mu_t(3*(i-1)+1:3*(i-1)+3, 1) = [partial_ts{ob}(i,2); partial_ts{ob}(i,3); partial_ts{ob}(i,4)];
+            R_t(3*(i-1)+1:3*(i-1)+3, 1) = [(R_f{ob}*partial_ts{ob}(i,2))^2; (theta_f*4.84814e-6)^2; (theta_f*4.84814e-6)^2];
         end
-        Xprop_truth{ob} = propagate(Xprop_truth{ob}, to, interval{ob}, obs_lat{ob}, obs_lon{ob});
-    end
-
-    tpr = to + interval{1}; % Time stamp of the prior means, weights, and covariances
-    idx_meas = cell(1, num_agents);
-    [idx_meas{1}, ~] = find(abs(noised_obs{1}(:,1) - tpr) < 1e-10); % Find row with time
-    idx_meas{2} = idx_meas{1};
-    tau = tau + 1;
-    msmt_exists = idx_meas{1} ~= 0;
-
-    % Verification Step
-    if (msmt_exists)
-        % Generate noisy msmt
-        zt = cell(1, num_agents);
-        for ob = 1:num_agents
-            R_weight = [theta_f*pi/648000, 0; 0, theta_f*pi/648000].^2;
-            zt{ob} = getNoisyMeas(Xprop_truth{ob}, R_weight, h);
-        end
-
-        idx = cell(num_agents, num_clouds_per_agent);
-        idx_meas = cell(1, num_agents);
-        for ob = 1:num_agents
-            for cloud = 1:num_clouds_per_agent
-                %if (truth_contained(ob, cloud) == 1)
-                if (tpr >= cVal{ob})
-                    K{ob, cloud} = Kmax;
-                else
-                    K{ob, cloud} = Kn;
-                end
-                [idx{ob, cloud}, K{ob, cloud}, ~] = cluster(Xm_cloud{ob, cloud}, cluster_by, K{ob, cloud});
-                %end
-            end
-            % Verification Step
-            [idx_meas{ob}, ~] = find(abs(noised_obs{ob}(:,1) - tpr) < 1e-10); % Find row with time
-        end
-        msmt_exists = idx_meas{1} ~= 0;
-
-        fprintf("Timestamp: %1.5f\n", tpr*time2hr);
-
-        mu_p = cell(num_agents, num_clouds_per_agent, Kmax);
-        P_p = cell(num_agents, num_clouds_per_agent, Kmax);
-        mu_mExp = cell(num_agents, num_clouds_per_agent);
-        rto = cell(1, num_agents);
-        [cPoints, mu_c, P_c, wm, wp] = calcGMMStatistics(Xm_cloud, idx, num_agents, num_clouds_per_agent, K, Kmax);
+    
+        R_t = diag(R_t);
+        data_vec = mvnrnd(mu_t, R_t)';
         
-        for ob = 1:num_agents
-            for cloud = 1:num_clouds_per_agent
-                orig_weight_metric{ob, cloud}(tau+2, :) = [min(wm{ob, cloud}), mean(wm{ob, cloud}), max(wm{ob, cloud})];
-                %if (truth_contained(ob, cloud) == 1)
-                % Extract means
-                mu_mExp{ob, cloud} = zeros(K{ob, cloud}, 6);
-                for k = 1:K{ob, cloud}
-                    mu_mExp{ob, cloud}(k,:) = mu_c{ob, cloud, k};
-                end
-
-                % [idx_trth, ~] = find(abs(full_ts(:,1) - tpr) < 1e-10);
-                % Xprop_truth = [full_ts(idx_trth,2:4), full_vts(idx_trth,2:4)]';
-                zc = noised_obs{ob}(idx_meas{ob},2:4)'; % Presumption: An observation occurs at this time step
-                xto = zc(1)*cos(zc(2))*cos(zc(3)); 
-                yto = zc(1)*sin(zc(2))*cos(zc(3)); 
-                zto = zc(1)*sin(zc(3)); 
-                rto{ob} = [xto, yto, zto];
-            
-                legend_string = {};
-                for k = 1:K{ob, cloud}
-                    R_vv = [R_f{ob}*partial_ts{ob}(idx_meas{ob},2), 0, 0; 0 theta_f*pi/648000, 0; 0, 0, theta_f*pi/648000].^2;
-                    Hxk = linHx(mu_c{ob, cloud, k}); % Linearize about prior mean component
-                    legend_string{k} = sprintf('Distribution %i',k);
-                    % legend_string{K+k} = sprintf('\\omega =  %1.4f, l = %1.4d', wm(k), gaussProb(zc, h(mu_c{k}), Hxk*P_c{k}*Hxk' + R_vv));
-                end
-                % legend_string{K+1} = "Centroids";
-                legend_string{K{ob, cloud}+1} = "Truth";
-                if(1) % Use for all time steps
-                    legend_string{K{ob, cloud}+1} = "Truth";
-
-                    if (plot_indv_clouds)
-                        plotting_cloud = Xm_cloud{ob, cloud};
-                        plotting_truth = Xprop_truth{ob};
-                        plotStateSpace(plotting_cloud, ...
-                                        plotting_truth, ...
-                                        K{ob, cloud}, ...
-                                        idx{ob, cloud}, ...
-                                        dist2km, ...
-                                        vel2kms, ...
-                                        colors, ...
-                                        sprintf('Timestep: %3.4f Hours (Prior) Ob: %i', [tpr*time2hr, ob]), ...
-                                        sprintf('%s/Observer%i/Topo/Timestep_%i_1B_cloud_%i.png', save_loc, ob, tau, cloud))
-                        plotMsmtSpace(plotting_cloud, ...
-                                        plotting_truth, ...
-                                        zt{ob}, ...
-                                        h, ...
-                                        K{ob, cloud}, ...
-                                        idx{ob, cloud}, ...
-                                        colors, ...
-                                        sprintf('Az-El Timestep: %3.4f Hours (Prior) Ob: %i', [tpr*time2hr, ob]), ...
-                                        sprintf('%s/Observer%i/Topo/Timestep_%i_1C_cloud_%i.png', save_loc, ob, tau, cloud), ...
-                                        msmt_exists)
-            
-                        plotting_cloud = Topo2ECI(Xm_cloud{ob, cloud}, tpr, obs_lat{ob}, obs_lon{ob});
-                        plotting_truth = Topo2ECI(Xprop_truth{ob}, tpr, obs_lat{ob}, obs_lon{ob});
-                        plotStateSpace(plotting_cloud, ...
-                                        plotting_truth, ...
-                                        K{ob, cloud}, ...
-                                        idx{ob, cloud}, ...
-                                        dist2km, ...
-                                        vel2kms, ...
-                                        colors, ...
-                                        sprintf('Timestep: %3.4f Hours (Prior) Ob: %i', [tpr*time2hr, ob]), ...
-                                        sprintf('%s/Observer%i/ECI/Timestep_%i_1B_cloud_%i.png', save_loc, ob, tau, cloud))
-            
-                        plotting_cloud = backConvertSynodic(Xm_cloud{ob, cloud}, tpr, obs_lat{ob}, obs_lon{ob});
-                        plotting_truth = backConvertSynodic(Xprop_truth{ob}, tpr, obs_lat{ob}, obs_lon{ob});
-                        plotStateSpace(plotting_cloud, ...
-                                        plotting_truth, ...
-                                        K{ob, cloud}, ...
-                                        idx{ob, cloud}, ...
-                                        dist2km, ...
-                                        vel2kms, ...
-                                        colors, ...
-                                        sprintf('Timestep: %3.4f Hours (Prior) Ob: %i', [tpr*time2hr, ob]), ...
-                                        sprintf('%s/Observer%i/Synodic/Timestep_%i_1B_cloud_%i.png', save_loc, ob, tau, cloud))
-                    end
-                end
-                %end
+        for i = 1:length(noised_obs{ob}(:,1))
+            noised_obs{ob}(i,2:4) = data_vec(3*(i-1)+1:3*(i-1)+3,1);
+            %noised_obs{ob}(i,2) = unifrnd(low_lim, up_lim)/dist2km;
+        % while(noised_obs(i,2) < low_lim/dist2km || noised_obs(i,2) > up_lim/dist2km)
+        %     noised_obs(i,2) = mvnrnd(partial_ts(i,2), (R_f*partial_ts(i,2))^2);
+        % end
+        end
+    
+        interval{ob} = noised_obs{ob}(2,1) - partial_ts{ob}(1,1);
+    
+        % Extract important time points from the noised_obs variable
+        i = 2;
+        while (i <= length(noised_obs{ob}(:,1)))
+            if (noised_obs{ob}(i,1) - noised_obs{ob}(i-1,1) > (interval{ob}+1e-11))
+                cTimes{ob} = [cTimes{ob}, noised_obs{ob}(i-1,1), noised_obs{ob}(i,1)];
             end
-            if ((size(Xp_cloudp, 2) > 1) && (plot_comb_clouds))
-                plotting_cloud = cell(num_clouds_per_agent);
-                for cloud = 1:num_clouds_per_agent
-                    plotting_cloud{cloud} = Xm_cloud{ob, cloud};
-                end
-                plotting_truth = Xprop_truth{ob};
-                plotStateSpaceCombined(plotting_cloud, ...
-                                        plotting_truth, ...
-                                        num_clouds_per_agent, ...
-                                        dist2km, ...
-                                        vel2kms, ...
-                                        colors, ...
-                                        cloud_names, ...
-                                        sprintf('Timestep: %3.4f Hours (Prior) Ob: %i', [tpr*time2hr, ob]), ...
-                                        sprintf('%s/Observer%i/Topo/Combined/Timestep_%i_1B_combined.png', save_loc, ob, tau))
-                plotMsmtSpaceCombined(plotting_cloud, ...
-                                        plotting_truth, ...
-                                        zt{ob}, ...
-                                        h, ...
-                                        num_clouds_per_agent, ...
-                                        colors, ...
-                                        cloud_names, ...
-                                        sprintf('Az-El Timestep: %3.4f Hours (Prior) Ob: %i', [tpr*time2hr, ob]), ...
-                                        sprintf('%s/Observer%i/Topo/Combined/Timestep_%i_1C_combined.png', save_loc, ob, tau), ...
-                                        msmt_exists)
-
-                plotting_cloud = cell(num_clouds_per_agent);
-                for cloud = 1:num_clouds_per_agent
-                    plotting_cloud{cloud} = Topo2ECI(Xm_cloud{ob, cloud}, tpr, obs_lat{ob}, obs_lon{ob});
-                end
-                plotting_truth = Topo2ECI(Xprop_truth{ob}, tpr, obs_lat{ob}, obs_lon{ob});
-                plotStateSpaceCombined(plotting_cloud, ...
-                                        plotting_truth, ...
-                                        num_clouds_per_agent, ...
-                                        dist2km, ...
-                                        vel2kms, ...
-                                        colors, ...
-                                        cloud_names, ...
-                                        sprintf('Timestep: %3.4f Hours (Prior) Ob: %i', [tpr*time2hr, ob]), ...
-                                        sprintf('%s/Observer%i/ECI/Combined/Timestep_%i_1B_combined.png', save_loc, ob, tau))
-
-                plotting_cloud = cell(num_clouds_per_agent);
-                for cloud = 1:num_clouds_per_agent
-                    plotting_cloud{cloud} = backConvertSynodic(Xm_cloud{ob, cloud}, tpr, obs_lat{ob}, obs_lon{ob});
-                end
-                plotting_truth = backConvertSynodic(Xprop_truth{ob}, tpr, obs_lat{ob}, obs_lon{ob});
-                plotStateSpaceCombined(plotting_cloud, ...
-                                        plotting_truth, ...
-                                        num_clouds_per_agent, ...
-                                        dist2km, ...
-                                        vel2kms, ...
-                                        colors, ...
-                                        cloud_names, ...
-                                        sprintf('Timestep: %3.4f Hours (Prior) Ob: %i', [tpr*time2hr, ob]), ...
-                                        sprintf('%s/Observer%i/Synodic/Combined/Timestep_%i_1B_combined.png', save_loc, ob, tau))
+            i = i + 1;
+        end
+        
+        largest_diff = noised_obs{ob}(2,1) - noised_obs{ob}(1,1);
+        for j = 2:length(noised_obs{ob}(:,1))
+            if (noised_obs{ob}(j,1) - noised_obs{ob}(j-1,1) > largest_diff+1e-11)
+                largest_diff = noised_obs{ob}(j,1) - noised_obs{ob}(j-1,1);
+                idx_cVal = j-1;
             end
         end
-
-        %% Update Step
-        R_vv = [theta_f*pi/648000, 0; 0, theta_f*pi/648000].^2;
-        for ob = 1:num_agents
-            for cloud = 1:num_clouds_per_agent
-                %if (truth_contained(ob, cloud) == 1)
-                % Update Step
-                % Hxk = linHx(mu_c{i}); % Linearize about prior mean component
-                for k = 1:K{ob, cloud}
-                    [mu_p{ob, cloud, k}, P_p{ob, cloud, k}] = kalmanUpdate(zt{ob}, cPoints{ob, cloud, k}, R_vv, mu_c{ob, cloud, k}, P_c{ob, cloud, k}, h);
-                    P_p{ob, cloud, k} = (P_p{ob, cloud, k} + P_p{ob, cloud, k}')/2;
-                end
-                % Weight update
-                wp{ob, cloud} = weightUpdate(wm{ob, cloud}, Xm_cloud{ob, cloud}, idx{ob, cloud}, zt{ob}, R_vv, h);
-                %end
-            end
+        cVal{ob} = noised_obs{ob}(idx_cVal,1);
+    
+        % Extract the first continuous observation track
+        hdo = []; % Matrix for a half day observation
+        hdo(1,:) = noised_obs{ob}(1,:);
+        i = 1;
+        while(noised_obs{ob}(i+1,1) - noised_obs{ob}(i,1) < full_ts{ob}(2,1) + 1e-15) % Add small epsilon due to roundoff error
+            hdo(i,:) = noised_obs{ob}(i+1,:);
+            i = i + 1;
         end
-    else
-        %% No Msmt Exists
-        fprintf("Timestamp: %1.5f\n", tpr*time2hr);
-        mu_p = cell(ob, cloud, 1); 
-        P_p = cell(ob, cloud, 1); 
-        wm = cell(ob, cloud);
-        cPoints = cell(ob, cloud, 1);
-        for ob = 1:num_agents
-            for cloud = 1:num_clouds_per_agent
-                %if (truth_contained(ob, cloud) == 1)
-                wm{ob, cloud} = zeros(1, 1);
-                if(tpr*time2hr>700)
-                    length(Xm_cloud{ob, cloud})
-                end
-                Xp_cloud{ob, cloud} = Xm_cloud{ob, cloud}; cPoints{ob, cloud, 1} = Xp_cloud{ob, cloud};
-                wp{ob, cloud} = [1];
-                mu_p{ob, cloud, 1} = mean(Xp_cloud{ob, cloud});
-                P_p{ob, cloud, 1} = cov(Xp_cloud{ob, cloud});
-                %end
-            end
+        
+        % Convert observation data into [X, Y, Z] data in the topographic frame.
+        
+        hdR{ob} = zeros(length(hdo(:,1)),4); % Convert quantities of hdo to [X, Y, Z]
+        hdR{ob}(:,1) = hdo(:,1); % Timestamp stays the same
+        hdR{ob}(:,2) = hdo(:,2) .* cos(hdo(:,4)) .* cos(hdo(:,3)); % Conversion to X
+        hdR{ob}(:,3) = hdo(:,2) .* cos(hdo(:,4)) .* sin(hdo(:,3)); % Conversion to Y
+        hdR{ob}(:,4) = hdo(:,2) .* sin(hdo(:,4)); % Conversion to Z
+        
+        pf{ob} = 0.5; % A factor between 0 to 1 describing the length of the day to interpolate [x, y]
+        nfit = 4; % Order of polynomial fitting (typically around 3-4)
+        in_len = round(pf{ob} * length(hdR{ob}(:,1))); % Length of interpolation interval
+    
+        % Modify interpolation interval length such that you are piecing through
+        % enough points.
+        if (in_len < nfit + 1)
+            in_len = nfit + 1;
+            pf{ob} = in_len/length(hdR{ob}(:,1)); % Modify pf such that it meets minimum condition
         end
+    
+        hdR_p{ob} = hdR{ob}(1:in_len,:); % Matrix for a partial half-day observation
+        
+        % Fit polynomials for X, Y, and Z (Cubic for X, Quadratic for X and Y)
+        coeffs_X = polyfit(hdR_p{ob}(:,1), hdR_p{ob}(:,2), nfit);
+        coeffs_Y = polyfit(hdR_p{ob}(:,1), hdR_p{ob}(:,3), nfit);
+        coeffs_Z = polyfit(hdR_p{ob}(:,1), hdR_p{ob}(:,4), nfit);
+        
+        % Predicted values for X, Y, and Z given the polynomial fits
+        X_fit = polyval(coeffs_X, hdR_p{ob}(:,1));
+        Y_fit = polyval(coeffs_Y, hdR_p{ob}(:,1));
+        Z_fit = polyval(coeffs_Z, hdR_p{ob}(:,1));
+        
+        % Now that you have analytically calculated the coefficients of the fitted
+        % polynomial, use them to obtain values for X_dot, Y_dot, and Z_dot.
+        % 1) Plot the X_dot, Y_dot, and Z_dot values for the time points for the
+        % slides. 
+        % 2) Find a generic way of obtaining and plotting X_dot, Y_dot, and Z_dot
+        % values given some set of [X_coeffs, Y_coeffs, Z_coeffs]. 
+        
+        coeffs_dX = polyDeriv(coeffs_X);
+        coeffs_dY = polyDeriv(coeffs_Y);
+        coeffs_dZ = polyDeriv(coeffs_Z);
+        
+        % Predicted values for Xdot, Ydot, and Zdot given the polynomial fits
+        Xdot_fit = polyval(coeffs_dX, hdR_p{ob}(:,1));
+        Ydot_fit = polyval(coeffs_dY, hdR_p{ob}(:,1));
+        Zdot_fit = polyval(coeffs_dZ, hdR_p{ob}(:,1));
+        
+        partial_vts{ob} = [];
+        partial_rts{ob} = [];
+        j = 1;
+        i = 1;
+        while (j <= length(hdR_p{ob}(:,1)))
+            if(hdR{ob}(j,1) == full_vts{ob}(i,1)) % Matching time index
+                partial_vts{ob}(j,:) = full_vts{ob}(i,:);
+                partial_rts{ob}(j,:) = full_ts{ob}(i,:);
+                j = j + 1;
+            end
+            i = i + 1;
+        end
+    
+        Xot_fitted = [X_fit(end,1); Y_fit(end,1); Z_fit(end,1); Xdot_fit(end,1); Ydot_fit(end,1); Zdot_fit(end,1)];
+        Xot_truth{ob} = [partial_rts{ob}(end,2:4), partial_vts{ob}(end,2:4)]';
+    
+        t_truth{ob} = partial_rts{ob}(end,1);
+        [idx_prop{ob}, c_prop{ob}] = find(full_ts{ob} == t_truth{ob});
+        Xprop_truth{ob} = [full_ts{ob}(idx_prop{ob}+1,2:4), full_vts{ob}(idx_prop{ob}+1,2:4)]';
     end
-
-    %% Resampling
-    c_id = cell(ob, cloud);
+    
+    Lp = 1*L;
+    X0cloud = cell(num_agents, num_clouds_per_agent);
+    fig_num = 1;
     for ob = 1:num_agents
         for cloud = 1:num_clouds_per_agent
-            %if (truth_contained(ob, cloud) == 1)
-            if (msmt_exists)
-                Xp_cloudp_temp = zeros(Lp, length(Xprop_truth{ob}));
-                c_id_temp = zeros(Lp,1);
-                for i = 1:Lp
-                    [Xp_cloudp_temp(i,:), c_id_temp(i)] = drawFrom(wp{ob, cloud}, mu_p(ob, cloud, :), P_p(ob, cloud, :)); 
-                end
-                Xp_cloudp{ob, cloud} = Xp_cloudp_temp;
-                c_id{ob, cloud} = c_id_temp;
-            else
-                K{ob, cloud} = 1;
-                Xp_cloudp{ob, cloud} = Xm_cloud{ob, cloud}; c_id{ob, cloud} = ones(length(Xp_cloudp{ob, cloud}(:,1)),1);
+            obs_X0cloud = zeros(L,6);
+            for i = 1:length(obs_X0cloud(:,1))
+                obs_X0cloud(i,:) = stateEstCloud(pf{ob}, nfit, theta_f, R_f{ob}, partial_ts{ob}, (partial_ts{ob}(2,1) - partial_ts{ob}(1,1)) + 1e-15, low_lim, up_lim, load_loc + num2str(ob));
             end
-            %end
-        end
-    end
-
-
-    %% Plot Posteriors
-    if(1)
-    % if(any(abs(tpr - cTimes) < 1e-10))j
-        % [idx_trth, ~] = find(abs(full_ts(:,1) - tpr) < 1e-10);
-        % Xprop_truth = [full_ts(idx_trth,2:4), full_vts(idx_trth,2:4)];
-
-        % Extract means
-        %mu_pExp = cell(1, num_agents);
-        
-        for ob = 1:num_agents
-            for cloud = 1:num_clouds_per_agent
-                %if (truth_contained(ob, cloud) == 1)
-                mu_pExp = zeros(K{ob, cloud}, 6);
-                for k = 1:K{ob, cloud}
-                    mu_pExp(k,:) = mu_p{ob, cloud, k};
-                end
+            X0cloud{ob, cloud} = enforceCislunarBounds(obs_X0cloud, t_truth{ob}, obs_lat{ob}, obs_lon{ob}, dist2km, vel2kms, low_lim, up_lim, vel_lim);%X0cloud(1:j,:);
+       
+            figure(fig_num);
+            fig_num = fig_num + 1;
+            set(gcf, 'units','normalized','outerposition',[0 0 1 1])
+            subplot(2,3,1)
+            plot(dist2km*X0cloud{ob, cloud}(:,1), dist2km*X0cloud{ob, cloud}(:,2), '.')
+            hold on;
+            plot(dist2km*Xot_truth{ob}(1), dist2km*Xot_truth{ob}(2), 'kx','MarkerSize', 15, 'LineWidth', 3)
+            title('X-Y');
+            xlabel('X (km.)');
+            ylabel('Y (km.)');
+            legend('Estimate','Truth');
+            hold off;
             
-                legend_string = {};
-                for k = 1:K{ob, cloud}
-                    legend_string{k} = sprintf('Contour %i', k);
-                    % legend_string{K+k} = sprintf('\\omega = %1.4f', wp(k));
-                end
-                % legend_string{K+1} = "Centroids";
-                legend_string{K{ob, cloud}+1} = "Truth";
-                
-                if (plot_indv_clouds)
-                    plotting_cloud = Xp_cloudp{ob, cloud};
-                    plotting_truth = Xprop_truth{ob};
-                    plotStateSpace(plotting_cloud, ...
-                                    plotting_truth, ...
-                                    K{ob, cloud}, ...
-                                    c_id{ob, cloud}, ...
-                                    dist2km, ...
-                                    vel2kms, ...
-                                    colors, ...
-                                    sprintf('Timestep: %3.4f Hours (Posterior) Ob: %i', [tpr*time2hr, ob]), ...
-                                    sprintf('%s/Observer%i/Topo/Timestep_%i_2B_cloud_%i.png', save_loc, ob, tau, cloud))
-                    plotMsmtSpace(plotting_cloud, ...
-                                    plotting_truth, ...
-                                    zt{ob}, ...
-                                    h, ...
-                                    K{ob, cloud}, ...
-                                    c_id{ob, cloud}, ...
-                                    colors, ...
-                                    sprintf('Az-El Timestep: %3.4f Hours (Posterior) Ob: %i', [tpr*time2hr, ob]), ...
-                                    sprintf('%s/Observer%i/Topo/Timestep_%i_2C_cloud_%i.png', save_loc, ob, tau, cloud), ...
-                                    msmt_exists)
-    
-                    plotting_cloud = Topo2ECI(Xp_cloudp{ob, cloud}, tpr, obs_lat{ob}, obs_lon{ob});
-                    plotting_truth = Topo2ECI(Xprop_truth{ob}, tpr, obs_lat{ob}, obs_lon{ob});
-                    plotStateSpace(plotting_cloud, ...
-                                    plotting_truth, ...
-                                    K{ob, cloud}, ...
-                                    c_id{ob, cloud}, ...
-                                    dist2km, ...
-                                    vel2kms, ...
-                                    colors, ...
-                                    sprintf('Timestep: %3.4f Hours (Posterior) Ob: %i', [tpr*time2hr, ob]), ...
-                                    sprintf('%s/Observer%i/ECI/Timestep_%i_2B_cloud_%i.png', save_loc, ob, tau, cloud))
-    
-                    plotting_cloud = backConvertSynodic(Xp_cloudp{ob, cloud}, tpr, obs_lat{ob}, obs_lon{ob});
-                    plotting_truth = backConvertSynodic(Xprop_truth{ob}, tpr, obs_lat{ob}, obs_lon{ob});
-                    plotStateSpace(plotting_cloud, ...
-                                    plotting_truth, ...
-                                    K{ob, cloud}, ...
-                                    c_id{ob, cloud}, ...
-                                    dist2km, ...
-                                    vel2kms, ...
-                                    colors, ...
-                                    sprintf('Timestep: %3.4f Hours (Posterior) Ob: %i', [tpr*time2hr, ob]), ...
-                                    sprintf('%s/Observer%i/Synodic/Timestep_%i_2B_cloud_%i.png', save_loc, ob, tau, cloud))
-                end
-                %end
-            end
-            if ((size(Xp_cloudp, 2) > 1) && (plot_comb_clouds))
-                
-                plotting_cloud = cell(num_clouds_per_agent);
-                for cloud = 1:num_clouds_per_agent
-                    plotting_cloud{cloud} = Xp_cloudp{ob, cloud};
-                end
-                plotting_truth = Xprop_truth{ob};
-                plotStateSpaceCombined(plotting_cloud, ...
-                                        plotting_truth, ...
-                                        num_clouds_per_agent, ...
-                                        dist2km, ...
-                                        vel2kms, ...
-                                        colors, ...
-                                        cloud_names, ...
-                                        sprintf('Timestep: %3.4f Hours (Posterior) Ob: %i', [tpr*time2hr, ob]), ...
-                                        sprintf('%s/Observer%i/Topo/Combined/Timestep_%i_2B_combined.png', save_loc, ob, tau))
-                plotMsmtSpaceCombined(plotting_cloud, ...
-                                        plotting_truth, ...
-                                        zt{ob}, ...
-                                        h, ...
-                                        num_clouds_per_agent, ...
-                                        colors, ...
-                                        cloud_names, ...
-                                        sprintf('Az-El Timestep: %3.4f Hours (Posterior) Ob: %i', [tpr*time2hr, ob]), ...
-                                        sprintf('%s/Observer%i/Topo/Combined/Timestep_%i_2C_combined.png', save_loc, ob, tau), ...
-                                        msmt_exists)
-
-                plotting_cloud = cell(num_clouds_per_agent);
-                for cloud = 1:num_clouds_per_agent
-                    plotting_cloud{cloud} = Topo2ECI(Xp_cloudp{ob, cloud}, tpr, obs_lat{ob}, obs_lon{ob});
-                end
-                plotting_truth = Topo2ECI(Xprop_truth{ob}, tpr, obs_lat{ob}, obs_lon{ob});
-                plotStateSpaceCombined(plotting_cloud, ...
-                                        plotting_truth, ...
-                                        num_clouds_per_agent, ...
-                                        dist2km, ...
-                                        vel2kms, ...
-                                        colors, ...
-                                        cloud_names, ...
-                                        sprintf('Timestep: %3.4f Hours (Posterior) Ob: %i', [tpr*time2hr, ob]), ...
-                                        sprintf('%s/Observer%i/ECI/Combined/Timestep_%i_2B_combined.png', save_loc, ob, tau))
-
-                plotting_cloud = cell(num_clouds_per_agent);
-                for cloud = 1:num_clouds_per_agent
-                    plotting_cloud{cloud} = backConvertSynodic(Xp_cloudp{ob, cloud}, tpr, obs_lat{ob}, obs_lon{ob});
-                end
-                plotting_truth = backConvertSynodic(Xprop_truth{ob}, tpr, obs_lat{ob}, obs_lon{ob});
-                plotStateSpaceCombined(plotting_cloud, ...
-                                        plotting_truth, ...
-                                        num_clouds_per_agent, ...
-                                        dist2km, ...
-                                        vel2kms, ...
-                                        colors, ...
-                                        cloud_names, ...
-                                        sprintf('Timestep: %3.4f Hours (Posterior) Ob: %i', [tpr*time2hr, ob]), ...
-                                        sprintf('%s/Observer%i/Synodic/Combined/Timestep_%i_2B_combined.png', save_loc, ob, tau))
-            end
-        end
-    end
-    % if(1)
-    %{
-    if(idx_meas ~= 0)
-        K = Kn;
-    else
-        K = 1;
-    end
-    %}
-
-    %% Metrics
-    for ob = 1:num_agents
-        for cloud = 1:num_clouds_per_agent
-            if (tau + 2 == 20)
-                tau
-            end
-            %if (truth_contained(ob, cloud) == 1)
-            if (msmt_exists)
-                %wsum = 0;
-                %for k = 1:K
-                %    wsum = wsum + wp(k)*det(P_p{k});
-                %end
-                %ent2(tau+2) = log(wsum);
-                metric_cloud = Topo2ECI(Xp_cloudp{ob, cloud}, tpr, obs_lat{ob}, obs_lon{ob});
-                metric_truth = Topo2ECI(Xprop_truth{ob}, tpr, obs_lat{ob}, obs_lon{ob});
-                %[truth_contained(ob, cloud), contained_failure_times(ob, cloud)] = checkIfInside(metric_cloud, metric_truth, tau);
-                [likelihood_metric_state_space{ob, cloud}(tau+2), ent2_det_cov_orig{ob, cloud}(tau+2), ent2_det_cov{ob, cloud}(tau+2), ent2_diff_ent{ob, cloud}(tau+2), ent2_discr_ent{ob, cloud}(tau+2), mahalanobis{ob, cloud}(tau+2), RMSE{ob, cloud}(tau+2, :), std_dev{ob, cloud}(tau+2, :), mat_weight_metric{ob, cloud}(tau+2, :), num_cluster{ob, cloud}(tau+2), num_particles{ob, cloud}(tau+2)] = getStateSpaceMetrics(K{ob, cloud}, metric_cloud, metric_truth, cluster_by);
-                [likelihood_metric_msmt_space{ob, cloud}(tau+2)] = getMsmtSpaceMetrics(K{ob, cloud}, Xp_cloudp{ob, cloud}, zt{ob}, h);
-            else
-                if (tpr >= cVal{ob})
-                    Ke = Kmax; % Clusters used for calculating entropy
-                else
-                    Ke = Kn; % Clusters used for calculating entropy
-                end
-                metric_cloud = Topo2ECI(Xp_cloudp{ob, cloud}, tpr, obs_lat{ob}, obs_lon{ob});
-                metric_truth = Topo2ECI(Xprop_truth{ob}, tpr, obs_lat{ob}, obs_lon{ob});
-                %[truth_contained(ob, cloud), contained_failure_times(ob, cloud)] = checkIfInside(metric_cloud, metric_truth, tau);
-                [likelihood_metric_state_space{ob, cloud}(tau+2), ent2_det_cov_orig{ob, cloud}(tau+2), ent2_det_cov{ob, cloud}(tau+2), ent2_diff_ent{ob, cloud}(tau+2), ent2_discr_ent{ob, cloud}(tau+2), mahalanobis{ob, cloud}(tau+2), RMSE{ob, cloud}(tau+2, :), std_dev{ob, cloud}(tau+2, :), mat_weight_metric{ob, cloud}(tau+2, :), num_cluster{ob, cloud}(tau+2), num_particles{ob, cloud}(tau+2)] = getStateSpaceMetrics(Ke, metric_cloud, metric_truth, cluster_by); % Get entropy as if you still are using six clusters
-            end
-            %end
+            subplot(2,3,2)
+            plot(dist2km*X0cloud{ob, cloud}(:,1), dist2km*X0cloud{ob, cloud}(:,3), '.')
+            hold on;
+            plot(dist2km*Xot_truth{ob}(1), dist2km*Xot_truth{ob}(3), 'kx','MarkerSize', 15, 'LineWidth', 3)
+            title('X-Z');
+            xlabel('X (km.)');
+            ylabel('Z (km.)');
+            legend('Estimate','Truth');
+            hold off;
+            
+            subplot(2,3,3)
+            plot(dist2km*X0cloud{ob, cloud}(:,2), dist2km*X0cloud{ob, cloud}(:,3), '.')
+            hold on;
+            plot(dist2km*Xot_truth{ob}(2), dist2km*Xot_truth{ob}(3), 'kx','MarkerSize', 15, 'LineWidth', 3)
+            title('Y-Z');
+            xlabel('Y (km.)');
+            ylabel('Z (km.)');
+            legend('Estimate','Truth');
+            hold off;
+            
+            subplot(2,3,4)
+            plot(vel2kms*X0cloud{ob, cloud}(:,4), vel2kms*X0cloud{ob, cloud}(:,5), '.')
+            hold on;
+            plot(vel2kms*Xot_truth{ob}(4), vel2kms*Xot_truth{ob}(5), 'kx','MarkerSize', 15, 'LineWidth', 3)
+            title('Xdot-Ydot');
+            xlabel('Xdot (km/s)');
+            ylabel('Ydot (km/s)');
+            legend('Estimate','Truth');
+            hold off;
+            
+            subplot(2,3,5)
+            plot(vel2kms*X0cloud{ob, cloud}(:,4), vel2kms*X0cloud{ob, cloud}(:,6), '.')
+            hold on;
+            plot(vel2kms*Xot_truth{ob}(4), vel2kms*Xot_truth{ob}(6), 'kx','MarkerSize', 15, 'LineWidth', 3)
+            title('Xdot-Zdot');
+            xlabel('Xdot (km/s)');
+            ylabel('Zdot (km/s)');
+            legend('Estimate','Truth');
+            hold off;
+            
+            subplot(2,3,6)
+            plot(vel2kms*X0cloud{ob, cloud}(:,5), vel2kms*X0cloud{ob, cloud}(:,6), '.')
+            hold on;
+            plot(vel2kms*Xot_truth{ob}(5), vel2kms*Xot_truth{ob}(6), 'kx','MarkerSize', 15, 'LineWidth', 3)
+            title('Ydot-Zdot');
+            xlabel('Ydot (km/s)');
+            ylabel('Zdot (km/s)');
+            legend('Estimate','Truth');
+            hold off;
+            
+            sg = sprintf('Timestep: %3.4f Hours Obs: %i', [t_truth{ob}*time2hr, ob]);
+            sgtitle(sg);
+            %savefig(gcf, "iodCloud_obs_" + num2str(ob) + "_cloud_" + num2str(cloud) + ".fig");
+            saveas(gcf, save_loc + "/Observer" + num2str(ob) + "/iodCloud_cloud_" + num2str(cloud) + ".png", 'png');
+            % saveas(gcf, './Simulations/Different Orbit Simulations/iodCloud.png', 'png');
         end
     end
     
-    %% Fusion
-    if(fuse_orig_clouds(fusion_idx) == true && tau == time_of_fusion(fusion_idx))
+    %% IOD Fusion
+    if(fuse_orig_clouds(fusion_idx) == true)
         disp("Fusing Clouds")
         % Convert clouds to Synodic Frame
-        converted_cloud_1 = backConvertSynodic(Xp_cloudp{1, 1}, tpr, obs_lat{1}, obs_lon{1});
-        converted_cloud_2 = backConvertSynodic(Xp_cloudp{2, 1}, tpr, obs_lat{2}, obs_lon{2});
+        converted_cloud_1 = backConvertSynodic(X0cloud{1, 1}, t_truth{1}, obs_lat{1}, obs_lon{1});
+        converted_cloud_2 = backConvertSynodic(X0cloud{2, 1}, t_truth{2}, obs_lat{2}, obs_lon{2});
         
         % Fuse Clouds
         [p3_simple, ~, weight_update_p3_1, weight_update_p3_2, fusion_bin_edges] = fusionMethods(converted_cloud_1, converted_cloud_2, cluster_by, Kmax, num_agents, Lp, disp_diagnostics, save_loc, dist2km, vel2kms, fusion_idx);
         
-        % Resample Clouds
+        % Resample Simple Fusion
         [p3_idx, p3_K, ~] = cluster(p3_simple, cluster_by, Kmax);
         [~, p3_mu, p3_P, p3_w, ~] = calcGMMStatistics({p3_simple}, {p3_idx}, 1, 1, {p3_K}, Kmax);
-        p3_resampled = zeros(Lp, length(Xprop_truth{ob}));
+        p3_resampled = zeros(Lp, length(Xot_truth{ob}));
         for i = 1:Lp
             [p3_resampled(i,:), ~] = drawFrom(p3_w{1}, p3_mu, p3_P); 
         end
-
+    
         % Convert clouds back to Topo Frame
-        Xp_cloudp{1, num_clouds_per_agent+1} = convertToTopo(p3_resampled, tpr, obs_lat{1}, obs_lon{1});
-        Xp_cloudp{1, num_clouds_per_agent+2} = convertToTopo(weight_update_p3_1, tpr, obs_lat{1}, obs_lon{1});
-        Xp_cloudp{2, num_clouds_per_agent+1} = convertToTopo(p3_resampled, tpr, obs_lat{2}, obs_lon{2});
-        Xp_cloudp{2, num_clouds_per_agent+2} = convertToTopo(weight_update_p3_2, tpr, obs_lat{2}, obs_lon{2});
-        cloud_names = [cloud_names, sprintf("%s %3.1f", fusion_types(2), tpr*time2hr), sprintf("%s %3.1f", fusion_types(3), tpr*time2hr)];
+        X0cloud{1, num_clouds_per_agent+1} = convertToTopo(p3_resampled, t_truth{1}, obs_lat{1}, obs_lon{1});
+        X0cloud{1, num_clouds_per_agent+2} = convertToTopo(weight_update_p3_1, t_truth{1}, obs_lat{1}, obs_lon{1});
+        X0cloud{2, num_clouds_per_agent+1} = convertToTopo(p3_resampled, t_truth{2}, obs_lat{2}, obs_lon{2});
+        X0cloud{2, num_clouds_per_agent+2} = convertToTopo(weight_update_p3_2, t_truth{2}, obs_lat{2}, obs_lon{2});
+        cloud_names = [cloud_names, sprintf("%s %3.1f", fusion_types(2), t_truth{1}*time2hr), sprintf("%s %3.1f", fusion_types(3), t_truth{1}*time2hr)];
         
         % Add space for metrics of new clouds
+        %{
         for ob = 1:num_agents
             for new_cloud = num_clouds_per_agent+1:num_clouds_per_agent + num_new_clouds_per_agent
                 ent1{ob, new_cloud} = NaN(size(ent1{ob, 1}));
@@ -1389,638 +341,1339 @@ for ts = min(idx_start{:}):(max(idx_end{:})-1)
                 mahalanobis{ob, new_cloud} = NaN(size(mahalanobis{ob, 1}));
                 RMSE{ob, new_cloud} = NaN(size(RMSE{ob, 1}));
                 std_dev{ob, new_cloud} = NaN(size(std_dev{ob, 1}));
-                mat_weight_metric{ob, new_cloud} = NaN(size(mat_weight_metric{ob, 1}));
-                orig_weight_metric{ob, new_cloud} = NaN(size(orig_weight_metric{ob, 1}));
+                weight_metric{ob, new_cloud} = NaN(size(weight_metric{ob, 1}));
                 num_cluster{ob, new_cloud} = NaN(size(num_cluster{ob, 1}));
                 num_particles{ob, new_cloud} = NaN(size(num_particles{ob, 1}));
             end
         end
-        
-        fuse_orig_clouds(fusion_idx) = false;
+        %}
         num_clouds_per_agent = num_clouds_per_agent + num_new_clouds_per_agent;
-        fusion_idx = min(size(fuse_orig_clouds, 2), fusion_idx + 1);
+        %fusion_idx = min(size(fuse_orig_clouds, 2), fusion_idx + 1);
     end
-
-
-    %% Reset Number of Particles
-
-    %if(abs(tpr - cTimes{1}(1)) < 1e-10)
-    %    Lp = 3000;
-    %elseif(abs(tpr - cTimes{1}(3)) < 1e-10)
-    %    Lp = 2000;
-    %end
-end
-
-%% Final Plots
-
-Xp_cloudp = cell(ob, num_clouds_per_agent);
-c_id = cell(ob, num_clouds_per_agent);
-for ob = 1:num_agents
-    x = 0:l_filt{ob}-1;
-    for cloud = 1:num_clouds_per_agent
-        fprintf('Final State Truth:\n')
-        disp(Xprop_truth{ob});
-        Xp_cloudp_temp = zeros(Lp, length(Xprop_truth{ob}));
-        c_id_temp = zeros(Lp,1);
-        for i = 1:Lp
-            [Xp_cloudp_temp(i,:), c_id_temp(i)] = drawFrom(wp{ob, cloud}, mu_p(ob, cloud, :), P_p(ob, cloud, :)); 
+    fuse_orig_clouds(fusion_idx) = false;
+    fusion_idx = fusion_idx + 1;
+    
+    %% IOD Plotting
+    if (plot_IOD)
+        for ob = 1:num_agents
+            for cloud = 1:num_clouds_per_agent
+                plotting_cloud = X0cloud{ob, cloud};
+                plotting_truth = Xot_truth{ob}';
+                idx = ones(size(plotting_cloud, 1), 1);
+                plotStateSpace(plotting_cloud, ...
+                                plotting_truth, ...
+                                K{ob, cloud}, ...
+                                idx, ...
+                                dist2km, ...
+                                vel2kms, ...
+                                colors, ...
+                                sprintf('IOD: %3.4f Hours Ob: %i', [t_truth{ob}*time2hr, ob]), ...
+                                sprintf('%s/Observer%i/Topo/IOD_cloud_%i.png', save_loc, ob, cloud))
+            
+                plotting_cloud = Topo2ECI(X0cloud{ob, cloud}, t_truth{ob}, obs_lat{ob}, obs_lon{ob});
+                plotting_truth = Topo2ECI(Xot_truth{ob}', t_truth{ob}, obs_lat{ob}, obs_lon{ob});
+                plotStateSpace(plotting_cloud, ...
+                                plotting_truth, ...
+                                K{ob, cloud}, ...
+                                idx, ...
+                                dist2km, ...
+                                vel2kms, ...
+                                colors, ...
+                                sprintf('IOD: %3.4f Hours Ob: %i', [t_truth{ob}*time2hr, ob]), ...
+                                sprintf('%s/Observer%i/ECI/IOD_cloud_%i.png', save_loc, ob, cloud))
+            
+                plotting_cloud = backConvertSynodic(X0cloud{ob, cloud}, t_truth{ob}, obs_lat{ob}, obs_lon{ob});
+                plotting_truth = backConvertSynodic(Xot_truth{ob}', t_truth{ob}, obs_lat{ob}, obs_lon{ob});
+                plotStateSpace(plotting_cloud, ...
+                                plotting_truth, ...
+                                K{ob, cloud}, ...
+                                idx, ...
+                                dist2km, ...
+                                vel2kms, ...
+                                colors, ...
+                                sprintf('IOD: %3.4f Hours Ob: %i', [t_truth{ob}*time2hr, ob]), ...
+                                sprintf('%s/Observer%i/Synodic/IOD_cloud_%i.png', save_loc, ob, cloud))
+            end
         end
-        Xp_cloudp{ob, cloud} = Xp_cloudp_temp;
-        c_id{ob, cloud} = c_id_temp;
+    end
+    
+    if (plot_IOD)
+        for ob = 1:num_agents
+            plotting_cloud = cell(num_clouds_per_agent);
+            for cloud = 1:num_clouds_per_agent
+                plotting_cloud{cloud} = X0cloud{ob, cloud};
+            end
+            plotting_truth = Xot_truth{ob}';
+            plotStateSpaceCombined(plotting_cloud, ...
+                                    plotting_truth, ...
+                                    num_clouds_per_agent, ...
+                                    dist2km, ...
+                                    vel2kms, ...
+                                    colors, ...
+                                    cloud_names, ...
+                                    sprintf('IOD: %3.4f Hours Ob: %i', [t_truth{ob}*time2hr, ob]), ...
+                                    sprintf('%s/Observer%i/Topo/Combined/IOD_combined.png', save_loc, ob))
+            
+            plotting_cloud = cell(num_clouds_per_agent);
+            for cloud = 1:num_clouds_per_agent
+                plotting_cloud{cloud} = Topo2ECI(X0cloud{ob, cloud}, t_truth{ob}, obs_lat{ob}, obs_lon{ob});
+            end
+            plotting_truth = Topo2ECI(Xot_truth{ob}', t_truth{ob}, obs_lat{ob}, obs_lon{ob});
+            plotStateSpaceCombined(plotting_cloud, ...
+                                    plotting_truth, ...
+                                    num_clouds_per_agent, ...
+                                    dist2km, ...
+                                    vel2kms, ...
+                                    colors, ...
+                                    cloud_names, ...
+                                    sprintf('IOD: %3.4f Hours Ob: %i', [t_truth{ob}*time2hr, ob]), ...
+                                    sprintf('%s/Observer%i/ECI/Combined/IOD_combined.png', save_loc, ob))
         
-        ent1{ob, cloud}(end,:) = getDiagCov(Xp_cloudp{ob, cloud});
-        %{
-        ent2_det_cov_orig{ob, cloud}(end) = [];
-        ent2_det_cov{ob, cloud}(end) = [];
-        ent2_diff_ent{ob, cloud}(end) = [];
-        ent2_discr_ent{ob, cloud}(end) = [];
-        likelihood_metric_state_space{ob, cloud}(end) = [];
-        likelihood_metric_msmt_space{ob, cloud}(end) = [];
-        mahalanobis{ob, cloud}(end) = [];
-        RMSE{ob, cloud}(end) = [];
-        std_dev{ob, cloud}(end, :) = [];
-        weight_metric{ob, cloud}(end, :) = [];
-        num_cluster{ob, cloud}(end) = [];
-        num_particles{ob, cloud}(end) = [];
-        %}
+            plotting_cloud = cell(num_clouds_per_agent);
+            for cloud = 1:num_clouds_per_agent
+                plotting_cloud{cloud} = backConvertSynodic(X0cloud{ob, cloud}, t_truth{ob}, obs_lat{ob}, obs_lon{ob});
+            end
+            plotting_truth = backConvertSynodic(Xot_truth{ob}', t_truth{ob}, obs_lat{ob}, obs_lon{ob});
+            plotStateSpaceCombined(plotting_cloud, ...
+                                    plotting_truth, ...
+                                    num_clouds_per_agent, ...
+                                    dist2km, ...
+                                    vel2kms, ...
+                                    colors, ...
+                                    cloud_names, ...
+                                    sprintf('IOD: %3.4f Hours Ob: %i', [t_truth{ob}*time2hr, ob]), ...
+                                    sprintf('%s/Observer%i/Synodic/Combined/IOD_combined.png', save_loc, ob))
+        end
     end
-    %{
-    f = figure;
-    fig_num = fig_num + 1;
-    f.WindowState = 'maximized';
-    subplot(2,3,1)
-    hold on
-    for cloud = 1:num_clouds_per_agent
-        plot(x, dist2km*std_dev{ob, cloud}(:,1), 'Color', colors(cloud))
-    end
-    xlabel('Filter Step #')
-    ylabel('sigma_X (km.)')
-    title('X Standard Deviation')
-    set(gca, 'YScale', 'log');
-    hold off
-
-    subplot(2,3,2)
-    hold on
-    for cloud = 1:num_clouds_per_agent
-        plot(x, dist2km*std_dev{ob, cloud}(:,2), 'Color', colors(cloud))
-    end
-    xlabel('Filter Step #')
-    ylabel('sigma_Y (km.)')
-    title('Y Standard Deviation')
-    set(gca, 'YScale', 'log');
-    hold off
     
-    subplot(2,3,3)
-    hold on
-    for cloud = 1:num_clouds_per_agent
-        plot(x, dist2km*std_dev{ob, cloud}(:,3), 'Color', colors(cloud))
-    end
-    xlabel('Filter Step #')
-    ylabel('sigma_Z (km.)')
-    title('Z Standard Deviation')
-    set(gca, 'YScale', 'log');
-    hold off
+    %% Start of PGM Filtering
     
-    subplot(2,3,4)
-    hold on
-    for cloud = 1:num_clouds_per_agent
-        plot(x, vel2kms*std_dev{ob, cloud}(:,4), 'Color', colors(cloud))
+    h = @(x) [atan2(x(2),x(1)); pi/2 - acos(x(3)/sqrt(x(1)^2 + x(2)^2 + x(3)^2))]; % Nonlinear measurement model
+    t_int = cell(1, num_agents);
+    Xm_cloud = X0cloud;
+    %Xbt = zeros(L, 6);
+    %X_all = cell(length(X0cloud(:,1)), 1);
+    %T_all = cell(length(X0cloud(:,1)), 1);
+    %Xm_bt = zeros(size(X0cloud));
+    for ob = 1:num_agents
+        t_int{ob} = hdR_p{ob}(end,1); % Time at which we are obtaining a state cloud
+        for cloud = 1:num_clouds_per_agent
+            Xm_bt = zeros(size(Xm_cloud{ob, cloud}));
+            Xbt = backConvertSynodic(X0cloud{ob, cloud}, t_int{ob}, obs_lat{ob}, obs_lon{ob});
+            for particle = 1:length(X0cloud{ob, cloud}(:,1))
+                % First, convert from X_{ot} in the topocentric frame to X_{bt} in the
+                % synodic frame.
+                %Xbt = backConvertSynodic(X0cloud{ob, cloud}(i,:)', t_int{ob}, obs_lat{ob}, obs_lon{ob});
+                % Next, propagate each X_{bt} in your particle cloud by a single time 
+                % step and convert back to the topographic frame.
+                 % Call ode45()
+                opts = odeset('Events', @termSat);
+                [t,X] = ode45(@cr3bp_dyn, [0 interval{ob}], Xbt(particle, :), opts); % Assumes termination event (i.e. target enters LEO)
+                Xm_bt(particle, :) = X(end,:);
+                % Xm_cloud(i,:) = procNoise(Xm_cloud(i,:)); % Adds process noise
+            end
+            Xm_cloud_tmp = convertToTopo(Xm_bt, t_int{ob} + interval{ob}, obs_lat{ob}, obs_lon{ob});
+            Xm_cloud{ob, cloud} = enforceCislunarBounds(Xm_cloud_tmp, t_int{ob} + interval{ob}, obs_lat{ob}, obs_lon{ob}, dist2km, vel2kms, low_lim, up_lim, vel_lim);
+        end
     end
-    xlabel('Filter Step #')
-    ylabel('sigma_Xdot (km/s)')
-    title('Xdot Standard Deviation')
-    set(gca, 'YScale', 'log');
-    hold off
+    % Initialize variables
+    idx = cell(num_agents, num_clouds_per_agent);
     
-    subplot(2,3,5)
-    hold on
-    for cloud = 1:num_clouds_per_agent
-        plot(x, vel2kms*std_dev{ob, cloud}(:,5), 'Color', colors(cloud))
+    for ob = 1:num_agents
+        for cloud = 1:num_clouds_per_agent
+            [idx{ob, cloud}, K{ob, cloud}, ~] = cluster(Xm_cloud{ob, cloud}, cluster_by, K{ob, cloud});
+        end
     end
-    xlabel('Filter Step #')
-    ylabel('sigma_Ydot (km/s)')
-    title('Ydot Standard Deviation')
-    set(gca, 'YScale', 'log');
-    hold off
     
-    subplot(2,3,6)
-    hold on
-    for cloud = 1:num_clouds_per_agent
-        plot(x, vel2kms*std_dev{ob, cloud}(:,6), 'Color', colors(cloud))
-    end
-    xlabel('Filter Step #')
-    ylabel('sigma_Zdot (km/s)')
-    title('Zdot Standard Deviation')
-    set(gca, 'YScale', 'log');
-    hold off
-  
-    sg = sprintf('%s/Observer%i/StdDev.png', save_loc, ob);
-    legend(cloud_names, 'Location', 'best')
-    drawnow;
-    pause(0.5);
-    exportgraphics(f, sg, 'Resolution', 150);
-    close(f);
-    %}
-    % Xprop_truth = [full_ts(idx_end,2:4), full_vts(idx_end,2:4)];
-    % mu_pExp = zeros(K, length(mu_p{1}));
-
+    [cPoints, mu_c, P_c, wm, ~] = calcGMMStatistics(Xm_cloud, idx, num_agents, num_clouds_per_agent, K, Kmax);
+    
     % Plot the results
-    plotMetricsPerState(fig_num, x, std_dev(ob, :), dist2km, vel2kms, cloud_names, colors, save_loc, ob, 'Sigma', 'Standard Deviation', 'StdDev.png');
-    fig_num = fig_num + 1;
-    plotMetricsPerState(fig_num, x, RMSE(ob, :), dist2km, vel2kms, cloud_names, colors, save_loc, ob, 'RMSE', 'RMSE', 'RMSE.png');
-    fig_num = fig_num + 1;
-
-    plotMetrics(fig_num, x, ent2_det_cov_orig(ob, :), cloud_names, colors, save_loc, ob, 'Det Cov Entropy Metric Using Original Clustering', 'Det Cov Entropy Ob: %i', 'DetCovEntropyOriginal.png');
-    fig_num = fig_num + 1;
-    plotMetrics(fig_num, x, ent2_det_cov(ob, :), cloud_names, colors, save_loc, ob, 'Det Cov Entropy Metric', 'Det Cov Entropy Ob: %i', 'DetCovEntropy.png');
-    fig_num = fig_num + 1;
-    plotMetrics(fig_num, x, ent2_diff_ent(ob, :), cloud_names, colors, save_loc, ob, 'Differential Entropy Metric', 'Differential Entropy Ob: %i', 'DiffEntropy.png');
-    fig_num = fig_num + 1;
-    plotMetrics(fig_num, x, ent2_discr_ent(ob, :), cloud_names, colors, save_loc, ob, 'Discrete Entropy Metric', 'Discrete Entropy Ob: %i', 'DiscrEntropy.png');
-    fig_num = fig_num + 1;
-
-    plotMetrics(fig_num, x, likelihood_metric_state_space(ob, :), cloud_names, colors, save_loc, ob, 'Log-Likelihood Metric', 'Log-Likelihood Ob: %i', 'Likelihood.png');
-    fig_num = fig_num + 1;
-    plotMetrics(fig_num, x, likelihood_metric_msmt_space(ob, :), cloud_names, colors, save_loc, ob, 'Log-Likelihood Msmt Space', 'Log-Likelihood Ob: %i', 'MsmtLikelihood.png');
-    fig_num = fig_num + 1;
-
-    plotMetrics(fig_num, x, mahalanobis(ob, :), cloud_names, colors, save_loc, ob, 'NEES', 'NEES Ob: %i', 'NEES.png');
-    fig_num = fig_num + 1;
-    %plotMetrics(fig_num, x, RMSE(ob, :), cloud_names, colors, save_loc, ob, 'RMSE', 'RMSE Ob: %i', 'RMSE.png');
-    %fig_num = fig_num + 1;
-
-    plotMetrics(fig_num, x, num_cluster(ob, :), cloud_names, colors, save_loc, ob, 'Number of Clusters', 'Number of Clusters Ob: %i', 'NumClusters.png');
-    fig_num = fig_num + 1;
-    plotMetrics(fig_num, x, num_particles(ob, :), cloud_names, colors, save_loc, ob, 'Number of Particles', 'Number of Particles Ob: %i', 'NumParticles.png');
-    fig_num = fig_num + 1;
+    warning('off', 'MATLAB:legend:IgnoringExtraEntries');
     
-    f = figure(fig_num);
-    fig_num = fig_num + 1;
-    f.WindowState = 'maximized';
-    hold on;
-    for cloud = 1:num_clouds_per_agent
-        %style = '--'; 
-        lw = 2;
-        %if cloud == chosen_method(ob)
-        %    style = '-'; lw = 3;
-        %end
-        plot(x, mat_weight_metric{ob, cloud}(:, 1), 'LineStyle', '--', 'Color', colors(cloud), 'LineWidth', lw);
-        plot(x, mat_weight_metric{ob, cloud}(:, 2), 'LineStyle', '-', 'Color', colors(cloud), 'LineWidth', lw);
-        plot(x, mat_weight_metric{ob, cloud}(:, 3), 'LineStyle', '--', 'Color', colors(cloud), 'LineWidth', lw);
-    end
-    %plot(x, num_particles{ob, 1}', x, num_particles{ob, 2}', x, num_particles{ob, 4}', x, num_particles{ob, 4}')
-    xlabel('Filter Step #')
-    ylabel('Min, Max, and Avg Weights')
-    title(sprintf('GMM Weights Ob: %i', ob))
-    %legend(cloud_names, 'Location', 'best')
-    hold off;
-    sg = sprintf('%s/Observer%i/%s.png', save_loc, ob, 'GMMWeights');
-    drawnow;
-    pause(0.5);
-    exportgraphics(f, sg, 'Resolution', 150);
-    close(f);
-
-    f = figure(fig_num);
-    fig_num = fig_num + 1;
-    f.WindowState = 'maximized';
-    hold on;
-    for cloud = 1:num_clouds_per_agent
-        %style = '--'; 
-        lw = 2;
-        %if cloud == chosen_method(ob)
-        %    style = '-'; lw = 3;
-        %end
-        plot(x, orig_weight_metric{ob, cloud}(:, 1), 'LineStyle', '--', 'Color', colors(cloud), 'LineWidth', lw);
-        plot(x, orig_weight_metric{ob, cloud}(:, 2), 'LineStyle', '-', 'Color', colors(cloud), 'LineWidth', lw);
-        plot(x, orig_weight_metric{ob, cloud}(:, 3), 'LineStyle', '--', 'Color', colors(cloud), 'LineWidth', lw);
-    end
-    %plot(x, num_particles{ob, 1}', x, num_particles{ob, 2}', x, num_particles{ob, 4}', x, num_particles{ob, 4}')
-    xlabel('Filter Step #')
-    ylabel('Min, Max, and Avg Weights')
-    title(sprintf('GMM Prior Weights (via Clustering) Ob: %i', ob))
-    %legend(cloud_names, 'Location', 'best')
-    hold off;
-    sg = sprintf('%s/Observer%i/%s.png', save_loc, ob, 'PriorWeights');
-    drawnow;
-    pause(0.5);
-    exportgraphics(f, sg, 'Resolution', 150);
-    close(f);
-
+    % Plot planar projections
     %{
-    x = 0:l_filt{ob}-1;
-    f = figure;
-    fig_num = fig_num + 1;
-    f.WindowState = 'maximized';
+    figure(2)
+    subplot(2,1,1)
     hold on;
-    for cloud = 1:num_clouds_per_agent
-        style = '--'; lw = 1.5;
-        %if cloud == chosen_method(ob)
-        %    style = '-'; lw = 3;
-        %end
-        plot(x, ent2_det_cov_orig{ob, cloud}', style, 'Color', colors(cloud));
+    for k = 1:K
+        clusterPoints = Xm_cloud(idx == k, :);
+        scatter3(dist2km*clusterPoints(:,1), dist2km*clusterPoints(:,2), dist2km*clusterPoints(:,3), 'filled', 'MarkerFaceColor', colors(k));
+        hold on;
     end
-    %plot(x, ent2{ob, 1}', x, ent2{ob, 2}', x, ent2{ob, 3}', x, ent2{ob, 4}')
-    xlabel('Filter Step #')
-    ylabel('Det Cov Entropy Metric Using Original Clustering')
-    legend(cloud_names, 'Location', 'best')
-    title('Det Cov Entropy Ob: %i', ob)
-    hold off;
-    sg = sprintf('%s/Observer%i/DetCovEntropyOriginal.png', save_loc, ob);
-    drawnow;
-    pause(0.5);
-    exportgraphics(f, sg, 'Resolution', 150);
-    close(f);
-
-    x = 0:l_filt{ob}-1;
-    f = figure;
-    fig_num = fig_num + 1;
-    f.WindowState = 'maximized';
-    hold on;
-    for cloud = 1:num_clouds_per_agent
-        style = '--'; lw = 1.5;
-        %if cloud == chosen_method(ob)
-        %    style = '-'; lw = 3;
-        %end
-        plot(x, ent2_det_cov{ob, cloud}', style, 'Color', colors(cloud));
-    end
-    %plot(x, ent2{ob, 1}', x, ent2{ob, 2}', x, ent2{ob, 3}', x, ent2{ob, 4}')
-    xlabel('Filter Step #')
-    ylabel('Det Cov Entropy Metric')
-    legend(cloud_names, 'Location', 'best')
-    title('Det Cov Entropy Ob: %i', ob)
-    hold off;
-    sg = sprintf('%s/Observer%i/DetCovEntropy.png', save_loc, ob);
-    drawnow;
-    pause(0.5);
-    exportgraphics(f, sg, 'Resolution', 150);
-    close(f);
+    plot3(dist2km*Xprop_truth(1), dist2km*Xprop_truth(2), dist2km*Xprop_truth(3), 'x','MarkerSize', 15, 'LineWidth', 3)
+    title('k-Means Clustered Distribution (Position)');
+    xlabel('X (km.)');
+    ylabel('Y (km.)');
+    zlabel('Z (km.)');
     
-    x = 0:l_filt{ob}-1;
-    f = figure;
-    fig_num = fig_num + 1;
-    f.WindowState = 'maximized';
-    hold on;
-    for cloud = 1:num_clouds_per_agent
-        style = '--'; lw = 1.5;
-        %if cloud == chosen_method(ob)
-        %    style = '-'; lw = 3;
-        %end
-        plot(x, ent2_diff_ent{ob, cloud}', style, 'Color', colors(cloud));
+    legend_string = {};
+    parfor k = 1:K
+        legend_string{k} = sprintf('\\omega = %1.4f', wm(k));
     end
-    %plot(x, ent2{ob, 1}', x, ent2{ob, 2}', x, ent2{ob, 3}', x, ent2{ob, 4}')
-    xlabel('Filter Step #')
-    ylabel('Differential Entropy Metric')
-    legend(cloud_names, 'Location', 'best')
-    title('Differential Entropy Ob: %i', ob)
+    % legend_string{K+1} = "Centroids";
+    legend_string{K+1} = "Truth";
+    legend(legend_string);
+    grid on;
+    view(3);
     hold off;
-    sg = sprintf('%s/Observer%i/DiffEntropy.png', save_loc, ob);
-    drawnow;
-    pause(0.5);
-    exportgraphics(f, sg, 'Resolution', 150);
-    close(f);
-
-    x = 0:l_filt{ob}-1;
-    f = figure;
-    fig_num = fig_num + 1;
-    f.WindowState = 'maximized';
-    hold on;
-    for cloud = 1:num_clouds_per_agent
-        style = '--'; lw = 1.5;
-        %if cloud == chosen_method(ob)
-        %    style = '-'; lw = 3;
-        %end
-        plot(x, ent2_discr_ent{ob, cloud}', style, 'Color', colors(cloud));
-    end
-    %plot(x, ent2{ob, 1}', x, ent2{ob, 2}', x, ent2{ob, 3}', x, ent2{ob, 4}')
-    xlabel('Filter Step #')
-    ylabel('Discrete Entropy Metric')
-    legend(cloud_names, 'Location', 'best')
-    title('Discrete Entropy Ob: %i', ob)
-    hold off;
-    sg = sprintf('%s/Observer%i/DiscrEntropy.png', save_loc, ob);
-    drawnow;
-    pause(0.5);
-    exportgraphics(f, sg, 'Resolution', 150);
-    close(f);
-
-    x = 0:l_filt{ob}-1;
-    f = figure;
-    fig_num = fig_num + 1;
-    f.WindowState = 'maximized';
-    hold on;
-    for cloud = 1:num_clouds_per_agent
-        style = '--'; lw = 1.5;
-        %if cloud == chosen_method(ob)
-        %    style = '-'; lw = 3;
-        %end
-        plot(x, likelihood_metric_state_space{ob, cloud}', style, 'Color', colors(cloud));
-    end
-    %plot(x, ent2{ob, 1}', x, ent2{ob, 2}', x, ent2{ob, 3}', x, ent2{ob, 4}')
-    xlabel('Filter Step #')
-    ylabel('Log-Likelihood Metric')
-    legend(cloud_names, 'Location', 'best')
-    title('Log-Likelihood Ob: %i', ob)
-    hold off;
-    sg = sprintf('%s/Observer%i/Likelihood.png', save_loc, ob);
-    drawnow;
-    pause(0.5);
-    exportgraphics(f, sg, 'Resolution', 150);
-    close(f);
-
-    x = 0:l_filt{ob}-1;
-    f = figure;
-    fig_num = fig_num + 1;
-    f.WindowState = 'maximized';
-    hold on;
-    for cloud = 1:num_clouds_per_agent
-        style = '--'; lw = 1.5;
-        %if cloud == chosen_method(ob)
-        %    style = '-'; lw = 3;
-        %end
-        plot(x, likelihood_metric_msmt_space{ob, cloud}', style, 'Color', colors(cloud));
-    end
-    %plot(x, ent2{ob, 1}', x, ent2{ob, 2}', x, ent2{ob, 3}', x, ent2{ob, 4}')
-    xlabel('Filter Step #')
-    ylabel('Log-Likelihood Msmt Space')
-    legend(cloud_names, 'Location', 'best')
-    title('Log-Likelihood Ob: %i', ob)
-    hold off;
-    sg = sprintf('%s/Observer%i/MsmtLikelihood.png', save_loc, ob);
-    drawnow;
-    pause(0.5);
-    exportgraphics(f, sg, 'Resolution', 150);
-    close(f);
-
-    f = figure;
-    fig_num = fig_num + 1;
-    f.WindowState = 'maximized';
-    x = 0:l_filt{ob}-1;
-    hold on;
-    for cloud = 1:num_clouds_per_agent
-        style = '--'; lw = 1.5;
-        %if cloud == chosen_method(ob)
-        %    style = '-'; lw = 3;
-        %end
-        semilogy(x, mahalanobis{ob, cloud}', style, 'Color', colors(cloud));
-    end
-    %plot(x, mahalanobis{ob, 1}', x, mahalanobis{ob, 2}', x, mahalanobis{ob, 3}', x, mahalanobis{ob, 4}')
-    %semilogy(x, mahalanobis{ob, 1}', x, mahalanobis{ob, 2}', x, mahalanobis{ob, 3}', x, mahalanobis{ob, 4}');
-    NEES_lb = chi2inv(0.025, size(Xprop_truth{ob}, 2));
-    NEES_ub = chi2inv(0.975, size(Xprop_truth{ob}, 2));
-    plot(x, NEES_lb*ones(1,size(x,2)), '--k')
-    plot(x, NEES_ub*ones(1,size(x,2)), '--k')
-    xlabel('Filter Step #')
-    ylabel('NEES')
-    title('NEES Ob: %i', ob)
-    legend([cloud_names, "NEES 95% CI"], 'Location', 'best')
-    set(gca, 'YScale', 'log');
-    hold off;
-    sg = sprintf('%s/Observer%i/Mahalanobis.png', save_loc, ob);
-    drawnow;
-    pause(0.5);
-    exportgraphics(f, sg, 'Resolution', 150);
-    close(f);
     
-    f = figure;
-    fig_num = fig_num + 1;
-    f.WindowState = 'maximized';
-    x = 0:l_filt{ob}-1;
+    subplot(2,1,2)
     hold on;
-    for cloud = 1:num_clouds_per_agent
-        style = '--'; lw = 1.5;
-        %if cloud == chosen_method(ob)
-        %    style = '-'; lw = 3;
-        %end
-        plot(x, RMSE{ob, cloud}', style, 'Color', colors(cloud));
+    for k = 1:K
+        clusterPoints = Xm_cloud(idx == k, :);
+        scatter3(vel2kms*clusterPoints(:,4), vel2kms*clusterPoints(:,5), vel2kms*clusterPoints(:,6), 'filled', 'MarkerFaceColor', colors(k));
+        hold on;
     end
-    %plot(x, mahalanobis{ob, 1}', x, mahalanobis{ob, 2}', x, mahalanobis{ob, 3}', x, mahalanobis{ob, 4}')
-    %semilogy(x, mahalanobis{ob, 1}', x, mahalanobis{ob, 2}', x, mahalanobis{ob, 3}', x, mahalanobis{ob, 4}');
-    xlabel('Filter Step #')
-    ylabel('RMSE')
-    title('RMSE Ob: %i', ob)
-    legend(cloud_names, 'Location', 'best')
-    set(gca, 'YScale', 'log');
+    plot3(vel2kms*Xprop_truth(4), vel2kms*Xprop_truth(5), vel2kms*Xprop_truth(6), 'x','MarkerSize', 15, 'LineWidth', 3)
+    title('k-Means Clustered Distribution (Velocity)');
+    xlabel('Vx (km/s)');
+    ylabel('Vy (km/s)');
+    zlabel('Vz (km/s)');
+    legend(legend_string);
+    grid on;
+    view(3);
     hold off;
-    sg = sprintf('%s/Observer%i/RMSE.png', save_loc, ob);
-    drawnow;
-    pause(0.5);
-    exportgraphics(f, sg, 'Resolution', 150);
-    close(f);
-
-    f = figure;
-    fig_num = fig_num + 1;
-    f.WindowState = 'maximized';
-    hold on;
-    for cloud = 1:num_clouds_per_agent
-        style = '--'; lw = 1.5;
-        plot(x, num_cluster{ob, cloud}', style, 'Color', colors(cloud));
-    end
-    xlabel('Filter Step #')
-    ylabel('Number of Clusters')
-    title('Number of Clusters Ob: %i', ob)
-    legend(cloud_names, 'Location', 'best')
-    hold off;
-    sg = sprintf('%s/Observer%i/NumClusters.png', save_loc, ob);
-    drawnow;
-    pause(0.5);
-    exportgraphics(f, sg, 'Resolution', 150);
-    close(f);
-    
-    f = figure;
-    fig_num = fig_num + 1;
-    f.WindowState = 'maximized';
-    hold on;
-    for cloud = 1:num_clouds_per_agent
-        style = '--'; lw = 1.5;
-        %if cloud == chosen_method(ob)
-        %    style = '-'; lw = 3;
-        %end
-        plot(x, num_particles{ob, cloud}', style, 'Color', colors(cloud));
-    end
-    %plot(x, num_particles{ob, 1}', x, num_particles{ob, 2}', x, num_particles{ob, 4}', x, num_particles{ob, 4}')
-    xlabel('Filter Step #')
-    ylabel('Number of Particles')
-    title('Number of Particles Ob: %i', ob)
-    legend(cloud_names, 'Location', 'best')
-    hold off;
-    sg = sprintf('%s/Observer%i/NumParticles.png', save_loc, ob);
-    drawnow;
-    pause(0.5);
-    exportgraphics(f, sg, 'Resolution', 150);
-    close(f);
     %}
-    %{
-    f = figure;
-    fig_num = fig_num + 1;
-    f.WindowState = 'maximized';
-    hold on;
-    min_val = 0;
-    max_val = max(idx_end{:})-1;
-    heatmap_norm = contained_failure_times / max_val;
-    imagesc(heatmap_norm);
-    colorbar;
-    xlabel('Filter Step #')
-    ylabel('Number of Particles')
-    title('Number of Particles Ob: %i', ob)
-    legend(cloud_names, 'Location', 'best')
-    hold off;
-    sg = sprintf('%s/Observer%i/NumParticles.png', save_loc, ob);
-    drawnow;
-    pause(0.5);
-    exportgraphics(f, sg, 'Resolution', 150);
-    close(f);
-    %}
-    for cloud = 1:num_clouds_per_agent
-        % Plot the results
-        f = figure;
-        fig_num = fig_num + 1;
-        subplot(2,1,1)
-        hold on;
-        for k = 1:K{ob, cloud}
-            clusterPoints = Xp_cloudp{ob, cloud}(c_id{ob, cloud} == k, :);
-            mu_pExp(k,:) = mu_p{ob, cloud, k};
-            scatter3(clusterPoints(:,1), clusterPoints(:,2), clusterPoints(:,3), 'filled', 'MarkerFaceColor', colors(k));
-            hold on;
+    legend_string = "Truth";
+    for ob = 1:num_agents
+        for cloud = 1:num_clouds_per_agent
+            % Plot planar projections
+            figure(fig_num)
+            fig_num = fig_num + 1;
+            set(gcf, 'units','normalized','outerposition',[0 0 1 1])
+            subplot(2,3,1)
+            for k = 1:K{ob, cloud}
+                clusterPoints = Xm_cloud{ob, cloud}(idx{ob, cloud} == k, :);
+                scatter(dist2km*clusterPoints(:,1), dist2km*clusterPoints(:,2), 'filled', ...
+                    'HandleVisibility', 'off', 'MarkerFaceColor', colors(k));
+                hold on;
+            end
+            % plot(dist2km*C_unorm(:,1), dist2km*C_unorm(:,2), '+', 'MarkerSize', 10, 'LineWidth', 3);
+            % hold on;
+            plot(dist2km*Xprop_truth{ob}(1), dist2km*Xprop_truth{ob}(2), 'kx','MarkerSize', 15, 'LineWidth', 3)
+            title('X-Y');
+            xlabel('X (km.)');
+            ylabel('Y (km.)');
+            legend(legend_string);
+            hold off;
+            
+            subplot(2,3,2)
+            for k = 1:K{ob, cloud}
+                clusterPoints = Xm_cloud{ob, cloud}(idx{ob, cloud} == k, :);
+                scatter(dist2km*clusterPoints(:,1), dist2km*clusterPoints(:,3), 'filled', ...
+                    'HandleVisibility', 'off', 'MarkerFaceColor', colors(k));
+                hold on;
+            end
+            % plot(dist2km*C_unorm(:,1), dist2km*C_unorm(:,3), '+', 'MarkerSize', 10, 'LineWidth', 3);
+            % hold on;
+            plot(dist2km*Xprop_truth{ob}(1), dist2km*Xprop_truth{ob}(3), 'kx','MarkerSize', 15, 'LineWidth', 3)
+            title('X-Z');
+            xlabel('X (km.)');
+            ylabel('Z (km.)');
+            legend(legend_string);
+            hold off;
+            
+            subplot(2,3,3)
+            for k = 1:K{ob, cloud}
+                clusterPoints = Xm_cloud{ob, cloud}(idx{ob, cloud} == k, :);
+                scatter(dist2km*clusterPoints(:,2), dist2km*clusterPoints(:,3), 'filled', ...
+                    'HandleVisibility', 'off', 'MarkerFaceColor', colors(k));
+                hold on;
+            end
+            % plot(dist2km*C_unorm(:,2), dist2km*C_unorm(:,3), '+', 'MarkerSize', 10, 'LineWidth', 3);
+            % hold on;
+            plot(dist2km*Xprop_truth{ob}(2), dist2km*Xprop_truth{ob}(3), 'kx','MarkerSize', 15, 'LineWidth', 3)
+            title('Y-Z');
+            xlabel('Y (km.)');
+            ylabel('Z (km.)');
+            legend(legend_string);
+            hold off;
+            
+            subplot(2,3,4)
+            for k = 1:K{ob, cloud}
+                clusterPoints = Xm_cloud{ob, cloud}(idx{ob, cloud} == k, :);
+                scatter(vel2kms*clusterPoints(:,4), vel2kms*clusterPoints(:,5), 'filled', ...
+                    'HandleVisibility', 'off', 'MarkerFaceColor', colors(k));
+                hold on;
+            end
+            % plot(vel2kms*C_unorm(:,4), vel2kms*C_unorm(:,5), '+', 'MarkerSize', 10, 'LineWidth', 3);
+            % hold on;
+            plot(vel2kms*Xprop_truth{ob}(4), vel2kms*Xprop_truth{ob}(5), 'kx','MarkerSize', 15, 'LineWidth', 3)
+            title('Xdot-Ydot');
+            xlabel('Xdot (km/s)');
+            ylabel('Ydot (km/s)');
+            legend(legend_string);
+            hold off;
+            
+            subplot(2,3,5)
+            for k = 1:K{ob, cloud}
+                clusterPoints = Xm_cloud{ob, cloud}(idx{ob, cloud} == k, :);
+                scatter(vel2kms*clusterPoints(:,4), vel2kms*clusterPoints(:,6), 'filled', 'MarkerFaceColor', colors(k));
+                hold on;
+            end
+            % plot(vel2kms*C_unorm(:,4), vel2kms*C_unorm(:,6), '+', 'MarkerSize', 10, 'LineWidth', 3);
+            % hold on;
+            plot(vel2kms*Xprop_truth{ob}(4), vel2kms*Xprop_truth{ob}(6), 'kx','MarkerSize', 15, 'LineWidth', 3)
+            title('Xdot-Zdot');
+            xlabel('Xdot (km/s)');
+            ylabel('Zdot (km/s)');
+            legend(legend_string);
+            hold off;
+            
+            subplot(2,3,6)
+            for k = 1:K{ob, cloud}
+                clusterPoints = Xm_cloud{ob, cloud}(idx{ob, cloud} == k, :);
+                scatter(vel2kms*clusterPoints(:,5), vel2kms*clusterPoints(:,6), 'filled', ...
+                    'HandleVisibility', 'off', 'MarkerFaceColor', colors(k));
+                hold on;
+            end
+            % plot(vel2kms*C_unorm(:,5), vel2kms*C_unorm(:,6), '+', 'MarkerSize', 10, 'LineWidth', 3, 'HandleVisibility', 'off');
+            % hold on;
+            plot(vel2kms*Xprop_truth{ob}(5), vel2kms*Xprop_truth{ob}(6), 'kx','MarkerSize', 15, 'LineWidth', 3)
+            title('Ydot-Zdot');
+            xlabel('Ydot (km/s)');
+            ylabel('Zdot (km/s)');
+            legend(legend_string);
+            hold off;
+            
+            sg = sprintf('Timestep: %3.4f Hours (Prior) Obs: %i', [time2hr*full_ts{ob}(idx_prop{ob}+1,1), ob]);
+            sgtitle(sg);
+            saveas(gcf, save_loc + "/Observer" + num2str(ob) + "/Timestep_0_1B_cloud_" + num2str(cloud) + ".png", 'png');
+            % saveas(gcf, './Simulations/Different Orbit Simulations/Timestep_0_1B', 'png');
+            Xprop_truth{ob} = [full_ts{ob}(idx_prop{ob}+1,2:4), full_vts{ob}(idx_prop{ob}+1,2:4)];
+            fprintf('Truth State: \n');
+            disp(Xprop_truth{ob});
         end
-        plot3(mu_pExp(:,1), mu_pExp(:,2), mu_pExp(:,3), 'k+', 'MarkerSize', 10, 'LineWidth', 3);
-        hold on;
-        plot3(Xprop_truth{ob}(1), Xprop_truth{ob}(2), Xprop_truth{ob}(3), 'x','MarkerSize', 20, 'LineWidth', 3)
-        title('Posterior Distribution (Position) Ob: %i', ob);
-        xlabel('X');
-        ylabel('Y');
-        zlabel('Z');
-        legend(legend_string);
-        grid on;
-        view(3);
-        hold off;
-        
-        subplot(2,1,2)
-        hold on;
-        for k = 1:K{ob, cloud}
-            clusterPoints = Xp_cloudp{ob, cloud}(c_id{ob, cloud} == k, :);
-            scatter3(clusterPoints(:,4), clusterPoints(:,5), clusterPoints(:,6), 'filled', 'MarkerFaceColor', colors(k));
-            hold on;
-        end
-        plot3(mu_pExp(:,4), mu_pExp(:,5), mu_pExp(:,6), 'k+', 'MarkerSize', 10, 'LineWidth', 3);
-        hold on;
-        plot3(Xprop_truth{ob}(4), Xprop_truth{ob}(5), Xprop_truth{ob}(6), 'x','MarkerSize', 20, 'LineWidth', 3)
-        title('Posterior Distribution (Velocity) Ob: %i', ob);
-        xlabel('Vx');
-        ylabel('Vy');
-        zlabel('Vz');
-        legend(legend_string);
-        grid on;
-        view(3);
-        hold off;
-        close(f);
+    end
     
-        % Plot planar projections
-        f = figure;
-        fig_num = fig_num + 1;
-        set(gcf, 'units','normalized','outerposition',[0 0 1 1])
-        subplot(2,3,1)
-        for k = 1:K{ob, cloud}
-            clusterPoints = Xp_cloudp{ob, cloud}(c_id{ob, cloud} == k, :);
-            scatter(clusterPoints(:,1), clusterPoints(:,2), 'filled', 'MarkerFaceColor', colors(k));
-            hold on;
-        end
-        plot(mu_pExp(:,1), mu_pExp(:,2), '+', 'MarkerSize', 10, 'LineWidth', 3);
-        hold on;
-        plot(Xprop_truth{ob}(1), Xprop_truth{ob}(2), 'kx','MarkerSize', 20, 'LineWidth', 3)
-        title('X-Y');
-        xlabel('X');
-        ylabel('Y');
-        legend(legend_string);
-        hold off;
+    % Now that we have a GMM representing the prior distribution, we have to
+    % use a Kalman update for each component: weight, mean, and covariance.
+    
+    % Posterior variables
+    wp = wm;
+    mu_p = mu_c;
+    P_p = P_c;
+    
+    % Comment this out if you wish to use noise.
+    % noised_obs = partial_ts;
+    tpr = cell(1, num_agents);
+    idx_meas = cell(1, num_agents);
+    Xp_cloud = Xm_cloud;
+    zt = cell(1, num_agents);
+    for ob = 1:num_agents
+        tpr{ob} = t_int{ob} + interval{ob}; % Time stamp of the prior means, weights, and covariances
+        [idx_meas{ob}, ~] = find(abs(noised_obs{ob}(:,1) - tpr{ob}) < 1e-10); % Find row with time
         
-        subplot(2,3,2)
-        for k = 1:K{ob, cloud}
-            clusterPoints = Xp_cloudp{ob, cloud}(c_id{ob, cloud} == k, :);
-            scatter(clusterPoints(:,1), clusterPoints(:,3), 'filled', 'MarkerFaceColor', colors(k));
-            hold on;
+        if (idx_meas{ob} ~= 0) % i.e. there exists a measurement
+            R_vv = [theta_f*pi/648000, 0; 0, theta_f*pi/648000].^2;
+            zt{ob} = getNoisyMeas(Xprop_truth{ob}, R_vv, h);
         end
-        plot(mu_pExp(:,1), mu_pExp(:,3), '+', 'MarkerSize', 10, 'LineWidth', 3);
-        hold on;
-        plot(Xprop_truth{ob}(1), Xprop_truth{ob}(3), 'kx','MarkerSize', 20, 'LineWidth', 3)
-        title('X-Z');
-        xlabel('X');
-        ylabel('Z');
-        legend(legend_string);
-        hold off;
+        for cloud = 1:num_clouds_per_agent
+            if (idx_meas{ob} ~= 0) % i.e. there exists a measurement
+                for k = 1:K{ob, cloud}
+                    % [mu_p{i}, P_p{i}] = ukfUpdate(zt, R_vv, mu_c{i}, P_c{i}, h);
+                    [mu_p{ob, cloud, k}, P_p{ob, cloud, k}] = kalmanUpdate(zt{ob}, cPoints{ob, cloud, k}, R_vv, mu_c{ob, cloud, k}, P_c{ob, cloud, k}, h);
+                end
+            
+                % Weight update
+                wp{ob, cloud} = weightUpdate(wm{ob, cloud}, Xm_cloud{ob, cloud}, idx{ob, cloud}, zt{ob}, R_vv, h);
+            
+            else
+                for k = 1:K{ob, cloud}
+                    wp{ob, cloud}(k) = wm{ob, cloud}(k);
+                    mu_p{ob, cloud, k} = mu_c{ob, cloud, k};
+                    P_p{ob, cloud, k} = P_c{ob, cloud, k};
+                end
+            end
+            
+            Lp = 8000;
+            c_id = zeros(length(Xp_cloud{ob, cloud}(:,1)),1);
+            for i = 1:L
+                [Xp_cloud{ob, cloud}(i,:), c_id(i)] = drawFrom(wp{ob, cloud}, mu_p(ob, cloud, :), P_p(ob, cloud, :)); 
+            end
         
-        subplot(2,3,3)
-        for k = 1:K{ob, cloud}
-            clusterPoints = Xp_cloudp{ob, cloud}(c_id{ob, cloud} == k, :);
-            scatter(clusterPoints(:,2), clusterPoints(:,3), 'filled', 'MarkerFaceColor', colors(k));
+            mu_pExp = zeros(K{ob, cloud}, 6);
+            %%save("./Outside2/Xp_cloud_Outside.mat", "Xp_cloud")
+            aa = zeros(3);
+            % Plot the results
+            figure(fig_num)
+            fig_num = fig_num + 1;
+            subplot(2,1,1)
             hold on;
-        end
-        plot(mu_pExp(:,2), mu_pExp(:,3), '+', 'MarkerSize', 10, 'LineWidth', 3);
-        hold on;
-        plot(Xprop_truth{ob}(2), Xprop_truth{ob}(3), 'kx','MarkerSize', 20, 'LineWidth', 3)
-        title('Y-Z');
-        xlabel('Y');
-        ylabel('Z');
-        legend(legend_string);
-        hold off;
-        
-        subplot(2,3,4)
-        for k = 1:K{ob, cloud}
-            clusterPoints = Xp_cloudp{ob, cloud}(c_id{ob, cloud} == k, :);
-            scatter(clusterPoints(:,4), clusterPoints(:,5), 'filled', 'MarkerFaceColor', colors(k));
+            for k = 1:K{ob, cloud}
+                clusterPoints = Xp_cloud{ob, cloud}(c_id == k, :);
+                mu_pExp(k,:) = mu_p{ob, cloud, k};
+                scatter3(dist2km*clusterPoints(:,1), dist2km*clusterPoints(:,2), dist2km*clusterPoints(:,3), 'filled', 'MarkerFaceColor', colors(k));
+                hold on;
+            end
+            plot3(dist2km*mu_pExp(:,1), dist2km*mu_pExp(:,2), dist2km*mu_pExp(:,3), 'k+', 'MarkerSize', 10, 'LineWidth', 3);
             hold on;
-        end
-        plot(mu_pExp(:,4), mu_pExp(:,5), '+', 'MarkerSize', 10, 'LineWidth', 3);
-        hold on;
-        plot(Xprop_truth{ob}(4), Xprop_truth{ob}(5), 'kx','MarkerSize', 20, 'LineWidth', 3)
-        title('Xdot-Ydot');
-        xlabel('Xdot');
-        ylabel('Ydot');
-        legend(legend_string);
-        hold off;
-        
-        subplot(2,3,5)
-        for k = 1:K{ob, cloud}
-            clusterPoints = Xp_cloudp{ob, cloud}(c_id{ob, cloud} == k, :);
-            scatter(clusterPoints(:,4), clusterPoints(:,6), 'filled', 'MarkerFaceColor', colors(k));
+            plot3(dist2km*Xprop_truth{ob}(1), dist2km*Xprop_truth{ob}(2), dist2km*Xprop_truth{ob}(3), 'x','MarkerSize', 20, 'LineWidth', 3)
+            title('Posterior Distribution (Position)');
+            xlabel('X (km.)');
+            ylabel('Y (km.)');
+            zlabel('Z (km.)');
+            legend(legend_string);
+            grid on;
+            view(3);
+            hold off;
+            
+            subplot(2,1,2)
             hold on;
-        end
-        plot(mu_pExp(:,4), mu_pExp(:,6), '+', 'MarkerSize', 10, 'LineWidth', 3);
-        hold on;
-        plot(Xprop_truth{ob}(4), Xprop_truth{ob}(6), 'kx','MarkerSize', 20, 'LineWidth', 3)
-        title('Xdot-Zdot');
-        xlabel('Xdot');
-        ylabel('Zdot');
-        legend(legend_string);
-        hold off;
-        
-        subplot(2,3,6)
-        for k = 1:K{ob, cloud}
-            clusterPoints = Xp_cloudp{ob, cloud}(c_id{ob, cloud} == k, :);
-            scatter(clusterPoints(:,5), clusterPoints(:,6), 'filled', 'MarkerFaceColor', colors(k));
+            for k = 1:K{ob, cloud}
+                clusterPoints = Xp_cloud{ob, cloud}(c_id == k, :);
+                scatter3(vel2kms*clusterPoints(:,4), vel2kms*clusterPoints(:,5), vel2kms*clusterPoints(:,6), 'filled', 'MarkerFaceColor', colors(k));
+                hold on;
+            end
+            plot3(vel2kms*mu_pExp(:,4), vel2kms*mu_pExp(:,5), vel2kms*mu_pExp(:,6), 'k+', 'MarkerSize', 10, 'LineWidth', 3);
             hold on;
+            plot3(vel2kms*Xprop_truth{ob}(4), vel2kms*Xprop_truth{ob}(5), vel2kms*Xprop_truth{ob}(6), 'x','MarkerSize', 20, 'LineWidth', 3)
+            title('Posterior Distribution (Velocity)');
+            xlabel('Vx (km/s)');
+            ylabel('Vy (km/s)');
+            zlabel('Vz (km/s)');
+            legend(legend_string);
+            grid on;
+            view(3);
+            hold off;
+            
+            legend_string = "Truth";
+            
+            % Plot planar projections
+            figure(4)
+            set(gcf, 'units','normalized','outerposition',[0 0 1 1])
+            subplot(2,3,1)
+            for k = 1:K{ob, cloud}
+                clusterPoints = Xp_cloud{ob, cloud}(c_id == k, :);
+                mu_pExp(k,:) = mu_p{ob, cloud, k};
+                scatter(dist2km*clusterPoints(:,1), dist2km*clusterPoints(:,2), 'filled', ...
+                    'HandleVisibility', 'off', 'MarkerFaceColor', colors(k));
+                hold on;
+            end
+            plot(dist2km*Xprop_truth{ob}(1), dist2km*Xprop_truth{ob}(2), 'kx','MarkerSize', 20, 'LineWidth', 3)
+            title('X-Y');
+            xlabel('X (km.)');
+            ylabel('Y (km.)');
+            legend(legend_string);
+            hold off;
+            
+            subplot(2,3,2)
+            for k = 1:K{ob, cloud}
+                clusterPoints = Xp_cloud{ob, cloud}(c_id == k, :);
+                mu_pExp(k,:) = mu_p{ob, cloud, k};
+                scatter(dist2km*clusterPoints(:,1), dist2km*clusterPoints(:,3), 'filled', ...
+                    'HandleVisibility', 'off', 'MarkerFaceColor', colors(k));
+                hold on;
+            end
+            plot(dist2km*Xprop_truth{ob}(1), dist2km*Xprop_truth{ob}(3), 'kx','MarkerSize', 20, 'LineWidth', 3)
+            title('X-Z');
+            xlabel('X (km.)');
+            ylabel('Z (km.)');
+            legend(legend_string);
+            hold off;
+            
+            subplot(2,3,3)
+            for k = 1:K{ob, cloud}
+                clusterPoints = Xp_cloud{ob, cloud}(c_id == k, :);
+                mu_pExp(k,:) = mu_p{ob, cloud, k};
+                scatter(dist2km*clusterPoints(:,2), dist2km*clusterPoints(:,3), 'filled', ...
+                    'HandleVisibility', 'off', 'MarkerFaceColor', colors(k));
+                hold on;
+            end
+            plot(dist2km*Xprop_truth{ob}(2), dist2km*Xprop_truth{ob}(3), 'kx','MarkerSize', 20, 'LineWidth', 3)
+            title('Y-Z');
+            xlabel('Y (km.)');
+            ylabel('Z (km.)');
+            legend(legend_string);
+            hold off;
+            
+            subplot(2,3,4)
+            for k = 1:K{ob, cloud}
+                clusterPoints = Xp_cloud{ob, cloud}(c_id == k, :);
+                mu_pExp(k,:) = mu_p{ob, cloud, k};
+                scatter(vel2kms*clusterPoints(:,4), vel2kms*clusterPoints(:,5), 'filled', ... 
+                    'HandleVisibility', 'off', 'MarkerFaceColor', colors(k));
+                hold on;
+            end
+            % plot(vel2kms*mu_pExp(:,4), vel2kms*mu_pExp(:,5), 'k+', 'MarkerSize', 10, 'LineWidth', 3);
+            % hold on;
+            plot(vel2kms*Xprop_truth{ob}(4), vel2kms*Xprop_truth{ob}(5), 'kx','MarkerSize', 20, 'LineWidth', 3)
+            title('Xdot-Ydot');
+            xlabel('Xdot (km/s)');
+            ylabel('Ydot (km/s)');
+            legend(legend_string);
+            hold off;
+            
+            subplot(2,3,5)
+            for k = 1:K{ob, cloud}
+                clusterPoints = Xp_cloud{ob, cloud}(c_id == k, :);
+                mu_pExp(k,:) = mu_p{ob, cloud, k};
+                scatter(vel2kms*clusterPoints(:,4), vel2kms*clusterPoints(:,6), 'filled', ...
+                    'HandleVisibility', 'off', 'MarkerFaceColor', colors(k));
+                hold on;
+            end
+            % plot(vel2kms*mu_pExp(:,4), vel2kms*mu_pExp(:,6), 'k+', 'MarkerSize', 10, 'LineWidth', 3);
+            % hold on;
+            plot(vel2kms*Xprop_truth{ob}(4), vel2kms*Xprop_truth{ob}(6), 'kx','MarkerSize', 20, 'LineWidth', 3)
+            title('Xdot-Zdot');
+            xlabel('Xdot (km/s)');
+            ylabel('Zdot (km/s)');
+            legend(legend_string);
+            hold off;
+            
+            subplot(2,3,6)
+            for k = 1:K{ob, cloud}
+                clusterPoints = Xp_cloud{ob, cloud}(c_id == k, :);
+                mu_pExp(k,:) = mu_p{ob, cloud, k};
+                scatter(vel2kms*clusterPoints(:,5), vel2kms*clusterPoints(:,6), 'filled', ...
+                    'HandleVisibility', 'off', 'MarkerFaceColor', colors(k));
+                hold on;
+            end
+            % plot(vel2kms*mu_pExp(:,5), vel2kms*mu_pExp(:,6), 'k+', 'MarkerSize', 10, 'LineWidth', 3);
+            % hold on;
+            plot(vel2kms*Xprop_truth{ob}(5), vel2kms*Xprop_truth{ob}(6), 'kx','MarkerSize', 20, 'LineWidth', 3)
+            title('Ydot-Zdot');
+            xlabel('Ydot (km/s)');
+            ylabel('Zdot (km/s)');
+            legend(legend_string);
+            hold off;
+            
+            sg = sprintf('Timestep: %3.4f Hours (Posterior) Obs: %i', [time2hr*noised_obs{ob}(idx_meas{ob},1), ob]);
+            sgtitle(sg);
+            saveas(gcf,save_loc + '/Observer' + num2str(ob) + '/Timestep_0_2B_cloud_' + num2str(cloud) + '.png', 'png')
+            % saveas(gcf,'./Simulations/Different Orbit Simulations/Timestep_0_2B.png', 'png')
         end
-        plot(mu_pExp(:,5), mu_pExp(:,6), '+', 'MarkerSize', 10, 'LineWidth', 3);
-        hold on;
-        plot(Xprop_truth{ob}(5), Xprop_truth{ob}(6), 'kx','MarkerSize', 20, 'LineWidth', 3)
-        title('Ydot-Zdot');
-        xlabel('Ydot');
-        ylabel('Zdot');
-        legend(legend_string);
-        hold off;
+    end
+    
+    % At this point, we have shown a PGM-I propagation and update step. The
+    % next step is to utilize this PGM-I update across all time steps during
+    % which the target is within our sensor FOV and see how the particle clouds
+    % (i.e. GM components) evolve over time. If we're lucky, we should see that
+    % the GMM tracks the truth over the interval.
+    
+    % Find and set the start and end times to simulation
+    idx_meas = cell(1, num_agents);
+    c_meas = cell(1, num_agents);
+    %idx_crit = cell(1, num_agents);
+    t_end = cell(1, num_agents);
+    idx_end = cell(1, num_agents);
+    idx_start = cell(1, num_agents);
+    l_filt = cell(1, num_agents);
+    for ob = 1:num_agents
+        [idx_meas{ob}, c_meas{ob}] = find(abs(hdR{ob}(:,1) - tpr{ob}) < 1e-10);
+        interval{ob} = hdR{ob}(idx_meas{ob},c_meas{ob}) - hdR{ob}(idx_meas{ob}-1,c_meas{ob});
+    
+        %[idx_crit{ob}, ~] = find(abs(full_ts{ob}(:,1)) >= (28*24)/time2hr, 1, 'first'); % Find the index of the last time step before a certain number of days have passed since orbit propagation
+        t_end{ob} = full_ts{ob}(end,1); % First observation of new pass + one more time step
         
-        sg = sprintf('Timestamp: %1.5f Ob: %i', [tpr*time2hr, ob]);
-        sgtitle(sg)
-        saveas(gcf, save_loc + '/Observer' + num2str(ob) + '/finalDistribution_normK_cloud_' + num2str(cloud) + '.png', 'png');
-        close(f);
-        % savefig(gcf, 'nextObservedTracklet_normK.fig');
+        tau = 0;
+        [idx_end{ob}, ~] = find(abs(full_ts{ob}(:,1) - t_end{ob}) < 1e-10);
+        [idx_start{ob}, ~] = find(abs(full_ts{ob}(:,1) - tpr{ob}) < 1e-10);
+        
+        l_filt{ob} = length(full_ts{ob}(idx_start{ob}:idx_end{ob},1))+1;
+    end
+    
+    likelihood_metric_state_space = cell(num_agents, num_clouds_per_agent);
+    likelihood_metric_msmt_space = cell(num_agents, num_clouds_per_agent);
+    ent2_det_cov = cell(num_agents, num_clouds_per_agent);
+    ent1 = cell(num_agents, num_clouds_per_agent);
+    mahalanobis = cell(num_agents, num_clouds_per_agent);
+    RMSE = cell(num_agents, num_clouds_per_agent);
+    std_dev = cell(num_agents, num_clouds_per_agent);
+    MC_std_dev = cell(num_agents, num_clouds_per_agent);
+    mat_weight_metric = cell(num_agents, num_clouds_per_agent);
+    orig_weight_metric = cell(num_agents, num_clouds_per_agent);
+    MC_consistency = cell(num_agents, num_clouds_per_agent);
+    num_cluster = cell(num_agents, num_clouds_per_agent);
+    num_particles = cell(num_agents, num_clouds_per_agent);
+    for ob = 1:num_agents
+        for cloud = 1:num_clouds_per_agent
+            likelihood_metric_state_space{ob, cloud} = zeros(l_filt{ob},1);
+            likelihood_metric_msmt_space{ob, cloud} = zeros(l_filt{ob},1);
+            ent2_det_cov{ob, cloud} = zeros(l_filt{ob},1);
+            ent1{ob, cloud} = zeros(l_filt{ob},length(mu_c{ob, cloud, 1})); 
+            mahalanobis{ob, cloud} = zeros(l_filt{ob}, 1);
+            RMSE{ob, cloud} = zeros(l_filt{ob}, 6);
+            std_dev{ob, cloud} = zeros(l_filt{ob}, 6);
+            MC_std_dev{ob, cloud} = zeros(l_filt{ob}, 1);
+            mat_weight_metric{ob, cloud} = zeros(l_filt{ob}, 3);
+            orig_weight_metric{ob, cloud} = zeros(l_filt{ob}, 3);
+            MC_consistency{ob, cloud} = zeros(l_filt{ob}, 1);
+            num_cluster{ob, cloud} = zeros(l_filt{ob}, 1);
+            num_particles{ob, cloud} = zeros(l_filt{ob}, 1);
+    
+            metric_cloud = Topo2ECI(X0cloud{ob, cloud}, tpr{ob}, obs_lat{ob}, obs_lon{ob});
+            metric_truth = Topo2ECI(Xot_truth{ob}', tpr{ob}, obs_lat{ob}, obs_lon{ob});
+    
+            %[truth_contained(ob, cloud), contained_failure_times(ob, cloud)] = checkIfInside(metric_cloud, metric_truth, 1);
+            [likelihood_metric_state_space{ob, cloud}(1), ent2_det_cov{ob, cloud}(1), mahalanobis{ob, cloud}(1), RMSE{ob, cloud}(1, :), std_dev{ob, cloud}(1, :), MC_std_dev{ob, cloud}(1), mat_weight_metric{ob, cloud}(1, :), MC_consistency{ob, cloud}(1), num_cluster{ob, cloud}(1), num_particles{ob, cloud}(1)] = getStateSpaceMetrics(1, metric_cloud, metric_truth, cluster_by);
+            
+            metric_cloud = Topo2ECI(Xp_cloud{ob, cloud}, tpr{ob}, obs_lat{ob}, obs_lon{ob});
+            metric_truth = Topo2ECI(Xprop_truth{ob}, tpr{ob}, obs_lat{ob}, obs_lon{ob});
+    
+            %[truth_contained(ob, cloud), contained_failure_times(ob, cloud)] = checkIfInside(metric_cloud, metric_truth, 2);
+            [likelihood_metric_state_space{ob, cloud}(2), ent2_det_cov{ob, cloud}(2), mahalanobis{ob, cloud}(2), RMSE{ob, cloud}(2, :), std_dev{ob, cloud}(2, :), MC_std_dev{ob, cloud}(2), mat_weight_metric{ob, cloud}(2, :), MC_consistency{ob, cloud}(2), num_cluster{ob, cloud}(2), num_particles{ob, cloud}(2)] = getStateSpaceMetrics(K{ob, cloud}, metric_cloud, metric_truth, cluster_by);%log(det(cov(Xp_cloud)));
+            ent1{ob, cloud}(1,:) = getDiagCov(X0cloud{ob, cloud});
+        end
+    end
+    Xp_cloudp = Xp_cloud;
+    
+    % for to = tpr:interval:(t_end-1e-11) % Looping over the times of observation for easier propagation
+    for ts = min(idx_start{:}):(max(idx_end{:})-1)
+        plot_indv_clouds = false;
+        if ((tau >= time_of_fusion(1)-3) && (tau <= time_of_fusion(1)+3))
+            plot_indv_clouds = true;
+        end
+        if ((tau >= time_of_fusion(2)-3) && (tau <= time_of_fusion(2)+3))
+            plot_indv_clouds = true;
+        end
+        Xm_cloud = cell(num_agents, num_clouds_per_agent);
+        interval = cell(1, num_agents);
+        for ob=1:num_agents
+            to = full_ts{ob}(ts,1);
+            interval{ob} = full_ts{ob}(ts+1,1) - to;
+            for cloud = 1:num_clouds_per_agent
+                %if (truth_contained(ob, cloud) == 1)
+                ent1{ob, cloud}(tau+2,:) = getDiagCov(Xp_cloudp{ob, cloud});
+            
+                % Propagation Step
+                Xm_cloud_tmp = propagate(Xp_cloudp{ob, cloud}, to, interval{ob}, obs_lat{ob}, obs_lon{ob});
+                Xm_cloud{ob, cloud} = enforceCislunarBounds(Xm_cloud_tmp, to + interval{ob}, obs_lat{ob}, obs_lon{ob}, dist2km, vel2kms, low_lim, up_lim, vel_lim);
+                %end
+            end
+            Xprop_truth{ob} = propagate(Xprop_truth{ob}, to, interval{ob}, obs_lat{ob}, obs_lon{ob});
+        end
+    
+        tpr = to + interval{1}; % Time stamp of the prior means, weights, and covariances
+        idx_meas = cell(1, num_agents);
+        [idx_meas{1}, ~] = find(abs(noised_obs{1}(:,1) - tpr) < 1e-10); % Find row with time
+        idx_meas{2} = idx_meas{1};
+        tau = tau + 1;
+        msmt_exists = idx_meas{1} ~= 0;
+    
+        % Verification Step
+        if (msmt_exists)
+            % Generate noisy msmt
+            zt = cell(1, num_agents);
+            for ob = 1:num_agents
+                R_weight = [theta_f*pi/648000, 0; 0, theta_f*pi/648000].^2;
+                zt{ob} = getNoisyMeas(Xprop_truth{ob}, R_weight, h);
+            end
+    
+            idx = cell(num_agents, num_clouds_per_agent);
+            idx_meas = cell(1, num_agents);
+            for ob = 1:num_agents
+                for cloud = 1:num_clouds_per_agent
+                    %if (truth_contained(ob, cloud) == 1)
+                    if (tpr >= cVal{ob})
+                        K{ob, cloud} = Kmax;
+                    else
+                        K{ob, cloud} = Kn;
+                    end
+                    [idx{ob, cloud}, K{ob, cloud}, ~] = cluster(Xm_cloud{ob, cloud}, cluster_by, K{ob, cloud});
+                    %end
+                end
+                % Verification Step
+                [idx_meas{ob}, ~] = find(abs(noised_obs{ob}(:,1) - tpr) < 1e-10); % Find row with time
+            end
+            msmt_exists = idx_meas{1} ~= 0;
+    
+            fprintf("Timestamp: %1.5f\n", tpr*time2hr);
+    
+            mu_p = cell(num_agents, num_clouds_per_agent, Kmax);
+            P_p = cell(num_agents, num_clouds_per_agent, Kmax);
+            mu_mExp = cell(num_agents, num_clouds_per_agent);
+            rto = cell(1, num_agents);
+            [cPoints, mu_c, P_c, wm, wp] = calcGMMStatistics(Xm_cloud, idx, num_agents, num_clouds_per_agent, K, Kmax);
+            
+            for ob = 1:num_agents
+                for cloud = 1:num_clouds_per_agent
+                    orig_weight_metric{ob, cloud}(tau+2, :) = [min(wm{ob, cloud}), mean(wm{ob, cloud}), max(wm{ob, cloud})];
+                    %if (truth_contained(ob, cloud) == 1)
+                    % Extract means
+                    mu_mExp{ob, cloud} = zeros(K{ob, cloud}, 6);
+                    for k = 1:K{ob, cloud}
+                        mu_mExp{ob, cloud}(k,:) = mu_c{ob, cloud, k};
+                    end
+    
+                    % [idx_trth, ~] = find(abs(full_ts(:,1) - tpr) < 1e-10);
+                    % Xprop_truth = [full_ts(idx_trth,2:4), full_vts(idx_trth,2:4)]';
+                    zc = noised_obs{ob}(idx_meas{ob},2:4)'; % Presumption: An observation occurs at this time step
+                    xto = zc(1)*cos(zc(2))*cos(zc(3)); 
+                    yto = zc(1)*sin(zc(2))*cos(zc(3)); 
+                    zto = zc(1)*sin(zc(3)); 
+                    rto{ob} = [xto, yto, zto];
+                
+                    legend_string = {};
+                    for k = 1:K{ob, cloud}
+                        R_vv = [R_f{ob}*partial_ts{ob}(idx_meas{ob},2), 0, 0; 0 theta_f*pi/648000, 0; 0, 0, theta_f*pi/648000].^2;
+                        Hxk = linHx(mu_c{ob, cloud, k}); % Linearize about prior mean component
+                        legend_string{k} = sprintf('Distribution %i',k);
+                        % legend_string{K+k} = sprintf('\\omega =  %1.4f, l = %1.4d', wm(k), gaussProb(zc, h(mu_c{k}), Hxk*P_c{k}*Hxk' + R_vv));
+                    end
+                    % legend_string{K+1} = "Centroids";
+                    legend_string{K{ob, cloud}+1} = "Truth";
+                    if(1) % Use for all time steps
+                        legend_string{K{ob, cloud}+1} = "Truth";
+    
+                        if (plot_indv_clouds)
+                            plotting_cloud = Xm_cloud{ob, cloud};
+                            plotting_truth = Xprop_truth{ob};
+                            plotStateSpace(plotting_cloud, ...
+                                            plotting_truth, ...
+                                            K{ob, cloud}, ...
+                                            idx{ob, cloud}, ...
+                                            dist2km, ...
+                                            vel2kms, ...
+                                            colors, ...
+                                            sprintf('Timestep: %3.4f Hours (Prior) Ob: %i', [tpr*time2hr, ob]), ...
+                                            sprintf('%s/Observer%i/Topo/Timestep_%i_1B_cloud_%i.png', save_loc, ob, tau, cloud))
+                            plotMsmtSpace(plotting_cloud, ...
+                                            plotting_truth, ...
+                                            zt{ob}, ...
+                                            h, ...
+                                            K{ob, cloud}, ...
+                                            idx{ob, cloud}, ...
+                                            colors, ...
+                                            sprintf('Az-El Timestep: %3.4f Hours (Prior) Ob: %i', [tpr*time2hr, ob]), ...
+                                            sprintf('%s/Observer%i/Topo/Timestep_%i_1C_cloud_%i.png', save_loc, ob, tau, cloud), ...
+                                            msmt_exists)
+                
+                            plotting_cloud = Topo2ECI(Xm_cloud{ob, cloud}, tpr, obs_lat{ob}, obs_lon{ob});
+                            plotting_truth = Topo2ECI(Xprop_truth{ob}, tpr, obs_lat{ob}, obs_lon{ob});
+                            plotStateSpace(plotting_cloud, ...
+                                            plotting_truth, ...
+                                            K{ob, cloud}, ...
+                                            idx{ob, cloud}, ...
+                                            dist2km, ...
+                                            vel2kms, ...
+                                            colors, ...
+                                            sprintf('Timestep: %3.4f Hours (Prior) Ob: %i', [tpr*time2hr, ob]), ...
+                                            sprintf('%s/Observer%i/ECI/Timestep_%i_1B_cloud_%i.png', save_loc, ob, tau, cloud))
+                
+                            plotting_cloud = backConvertSynodic(Xm_cloud{ob, cloud}, tpr, obs_lat{ob}, obs_lon{ob});
+                            plotting_truth = backConvertSynodic(Xprop_truth{ob}, tpr, obs_lat{ob}, obs_lon{ob});
+                            plotStateSpace(plotting_cloud, ...
+                                            plotting_truth, ...
+                                            K{ob, cloud}, ...
+                                            idx{ob, cloud}, ...
+                                            dist2km, ...
+                                            vel2kms, ...
+                                            colors, ...
+                                            sprintf('Timestep: %3.4f Hours (Prior) Ob: %i', [tpr*time2hr, ob]), ...
+                                            sprintf('%s/Observer%i/Synodic/Timestep_%i_1B_cloud_%i.png', save_loc, ob, tau, cloud))
+                        end
+                    end
+                    %end
+                end
+                if ((size(Xp_cloudp, 2) > 1) && (plot_comb_clouds))
+                    plotting_cloud = cell(num_clouds_per_agent);
+                    for cloud = 1:num_clouds_per_agent
+                        plotting_cloud{cloud} = Xm_cloud{ob, cloud};
+                    end
+                    plotting_truth = Xprop_truth{ob};
+                    plotStateSpaceCombined(plotting_cloud, ...
+                                            plotting_truth, ...
+                                            num_clouds_per_agent, ...
+                                            dist2km, ...
+                                            vel2kms, ...
+                                            colors, ...
+                                            cloud_names, ...
+                                            sprintf('Timestep: %3.4f Hours (Prior) Ob: %i', [tpr*time2hr, ob]), ...
+                                            sprintf('%s/Observer%i/Topo/Combined/Timestep_%i_1B_combined.png', save_loc, ob, tau))
+                    plotMsmtSpaceCombined(plotting_cloud, ...
+                                            plotting_truth, ...
+                                            zt{ob}, ...
+                                            h, ...
+                                            num_clouds_per_agent, ...
+                                            colors, ...
+                                            cloud_names, ...
+                                            sprintf('Az-El Timestep: %3.4f Hours (Prior) Ob: %i', [tpr*time2hr, ob]), ...
+                                            sprintf('%s/Observer%i/Topo/Combined/Timestep_%i_1C_combined.png', save_loc, ob, tau), ...
+                                            msmt_exists)
+    
+                    plotting_cloud = cell(num_clouds_per_agent);
+                    for cloud = 1:num_clouds_per_agent
+                        plotting_cloud{cloud} = Topo2ECI(Xm_cloud{ob, cloud}, tpr, obs_lat{ob}, obs_lon{ob});
+                    end
+                    plotting_truth = Topo2ECI(Xprop_truth{ob}, tpr, obs_lat{ob}, obs_lon{ob});
+                    plotStateSpaceCombined(plotting_cloud, ...
+                                            plotting_truth, ...
+                                            num_clouds_per_agent, ...
+                                            dist2km, ...
+                                            vel2kms, ...
+                                            colors, ...
+                                            cloud_names, ...
+                                            sprintf('Timestep: %3.4f Hours (Prior) Ob: %i', [tpr*time2hr, ob]), ...
+                                            sprintf('%s/Observer%i/ECI/Combined/Timestep_%i_1B_combined.png', save_loc, ob, tau))
+    
+                    plotting_cloud = cell(num_clouds_per_agent);
+                    for cloud = 1:num_clouds_per_agent
+                        plotting_cloud{cloud} = backConvertSynodic(Xm_cloud{ob, cloud}, tpr, obs_lat{ob}, obs_lon{ob});
+                    end
+                    plotting_truth = backConvertSynodic(Xprop_truth{ob}, tpr, obs_lat{ob}, obs_lon{ob});
+                    plotStateSpaceCombined(plotting_cloud, ...
+                                            plotting_truth, ...
+                                            num_clouds_per_agent, ...
+                                            dist2km, ...
+                                            vel2kms, ...
+                                            colors, ...
+                                            cloud_names, ...
+                                            sprintf('Timestep: %3.4f Hours (Prior) Ob: %i', [tpr*time2hr, ob]), ...
+                                            sprintf('%s/Observer%i/Synodic/Combined/Timestep_%i_1B_combined.png', save_loc, ob, tau))
+                end
+            end
+    
+            %% Update Step
+            R_vv = [theta_f*pi/648000, 0; 0, theta_f*pi/648000].^2;
+            for ob = 1:num_agents
+                for cloud = 1:num_clouds_per_agent
+                    %if (truth_contained(ob, cloud) == 1)
+                    % Update Step
+                    % Hxk = linHx(mu_c{i}); % Linearize about prior mean component
+                    for k = 1:K{ob, cloud}
+                        [mu_p{ob, cloud, k}, P_p{ob, cloud, k}] = kalmanUpdate(zt{ob}, cPoints{ob, cloud, k}, R_vv, mu_c{ob, cloud, k}, P_c{ob, cloud, k}, h);
+                        P_p{ob, cloud, k} = (P_p{ob, cloud, k} + P_p{ob, cloud, k}')/2;
+                    end
+                    % Weight update
+                    wp{ob, cloud} = weightUpdate(wm{ob, cloud}, Xm_cloud{ob, cloud}, idx{ob, cloud}, zt{ob}, R_vv, h);
+                    %end
+                end
+            end
+        else
+            %% No Msmt Exists
+            fprintf("Timestamp: %1.5f\n", tpr*time2hr);
+            mu_p = cell(ob, cloud, 1); 
+            P_p = cell(ob, cloud, 1); 
+            wm = cell(ob, cloud);
+            cPoints = cell(ob, cloud, 1);
+            for ob = 1:num_agents
+                for cloud = 1:num_clouds_per_agent
+                    %if (truth_contained(ob, cloud) == 1)
+                    wm{ob, cloud} = zeros(1, 1);
+                    if(tpr*time2hr>700)
+                        length(Xm_cloud{ob, cloud})
+                    end
+                    Xp_cloud{ob, cloud} = Xm_cloud{ob, cloud}; cPoints{ob, cloud, 1} = Xp_cloud{ob, cloud};
+                    wp{ob, cloud} = [1];
+                    mu_p{ob, cloud, 1} = mean(Xp_cloud{ob, cloud});
+                    P_p{ob, cloud, 1} = cov(Xp_cloud{ob, cloud});
+                    %end
+                end
+            end
+        end
+    
+        %% Resampling
+        c_id = cell(ob, cloud);
+        for ob = 1:num_agents
+            for cloud = 1:num_clouds_per_agent
+                %if (truth_contained(ob, cloud) == 1)
+                if (msmt_exists)
+                    Xp_cloudp_temp = zeros(Lp, length(Xprop_truth{ob}));
+                    c_id_temp = zeros(Lp,1);
+                    for i = 1:Lp
+                        [Xp_cloudp_temp(i,:), c_id_temp(i)] = drawFrom(wp{ob, cloud}, mu_p(ob, cloud, :), P_p(ob, cloud, :)); 
+                    end
+                    Xp_cloudp{ob, cloud} = Xp_cloudp_temp;
+                    c_id{ob, cloud} = c_id_temp;
+                else
+                    K{ob, cloud} = 1;
+                    Xp_cloudp{ob, cloud} = Xm_cloud{ob, cloud}; c_id{ob, cloud} = ones(length(Xp_cloudp{ob, cloud}(:,1)),1);
+                end
+                %end
+            end
+        end
+    
+    
+        %% Plot Posteriors
+        if(1)
+        % if(any(abs(tpr - cTimes) < 1e-10))j
+            % [idx_trth, ~] = find(abs(full_ts(:,1) - tpr) < 1e-10);
+            % Xprop_truth = [full_ts(idx_trth,2:4), full_vts(idx_trth,2:4)];
+    
+            % Extract means
+            %mu_pExp = cell(1, num_agents);
+            
+            for ob = 1:num_agents
+                for cloud = 1:num_clouds_per_agent
+                    %if (truth_contained(ob, cloud) == 1)
+                    mu_pExp = zeros(K{ob, cloud}, 6);
+                    for k = 1:K{ob, cloud}
+                        mu_pExp(k,:) = mu_p{ob, cloud, k};
+                    end
+                
+                    legend_string = {};
+                    for k = 1:K{ob, cloud}
+                        legend_string{k} = sprintf('Contour %i', k);
+                        % legend_string{K+k} = sprintf('\\omega = %1.4f', wp(k));
+                    end
+                    % legend_string{K+1} = "Centroids";
+                    legend_string{K{ob, cloud}+1} = "Truth";
+                    
+                    if (plot_indv_clouds)
+                        plotting_cloud = Xp_cloudp{ob, cloud};
+                        plotting_truth = Xprop_truth{ob};
+                        plotStateSpace(plotting_cloud, ...
+                                        plotting_truth, ...
+                                        K{ob, cloud}, ...
+                                        c_id{ob, cloud}, ...
+                                        dist2km, ...
+                                        vel2kms, ...
+                                        colors, ...
+                                        sprintf('Timestep: %3.4f Hours (Posterior) Ob: %i', [tpr*time2hr, ob]), ...
+                                        sprintf('%s/Observer%i/Topo/Timestep_%i_2B_cloud_%i.png', save_loc, ob, tau, cloud))
+                        plotMsmtSpace(plotting_cloud, ...
+                                        plotting_truth, ...
+                                        zt{ob}, ...
+                                        h, ...
+                                        K{ob, cloud}, ...
+                                        c_id{ob, cloud}, ...
+                                        colors, ...
+                                        sprintf('Az-El Timestep: %3.4f Hours (Posterior) Ob: %i', [tpr*time2hr, ob]), ...
+                                        sprintf('%s/Observer%i/Topo/Timestep_%i_2C_cloud_%i.png', save_loc, ob, tau, cloud), ...
+                                        msmt_exists)
+        
+                        plotting_cloud = Topo2ECI(Xp_cloudp{ob, cloud}, tpr, obs_lat{ob}, obs_lon{ob});
+                        plotting_truth = Topo2ECI(Xprop_truth{ob}, tpr, obs_lat{ob}, obs_lon{ob});
+                        plotStateSpace(plotting_cloud, ...
+                                        plotting_truth, ...
+                                        K{ob, cloud}, ...
+                                        c_id{ob, cloud}, ...
+                                        dist2km, ...
+                                        vel2kms, ...
+                                        colors, ...
+                                        sprintf('Timestep: %3.4f Hours (Posterior) Ob: %i', [tpr*time2hr, ob]), ...
+                                        sprintf('%s/Observer%i/ECI/Timestep_%i_2B_cloud_%i.png', save_loc, ob, tau, cloud))
+        
+                        plotting_cloud = backConvertSynodic(Xp_cloudp{ob, cloud}, tpr, obs_lat{ob}, obs_lon{ob});
+                        plotting_truth = backConvertSynodic(Xprop_truth{ob}, tpr, obs_lat{ob}, obs_lon{ob});
+                        plotStateSpace(plotting_cloud, ...
+                                        plotting_truth, ...
+                                        K{ob, cloud}, ...
+                                        c_id{ob, cloud}, ...
+                                        dist2km, ...
+                                        vel2kms, ...
+                                        colors, ...
+                                        sprintf('Timestep: %3.4f Hours (Posterior) Ob: %i', [tpr*time2hr, ob]), ...
+                                        sprintf('%s/Observer%i/Synodic/Timestep_%i_2B_cloud_%i.png', save_loc, ob, tau, cloud))
+                    end
+                    %end
+                end
+                if ((size(Xp_cloudp, 2) > 1) && (plot_comb_clouds))
+                    
+                    plotting_cloud = cell(num_clouds_per_agent);
+                    for cloud = 1:num_clouds_per_agent
+                        plotting_cloud{cloud} = Xp_cloudp{ob, cloud};
+                    end
+                    plotting_truth = Xprop_truth{ob};
+                    plotStateSpaceCombined(plotting_cloud, ...
+                                            plotting_truth, ...
+                                            num_clouds_per_agent, ...
+                                            dist2km, ...
+                                            vel2kms, ...
+                                            colors, ...
+                                            cloud_names, ...
+                                            sprintf('Timestep: %3.4f Hours (Posterior) Ob: %i', [tpr*time2hr, ob]), ...
+                                            sprintf('%s/Observer%i/Topo/Combined/Timestep_%i_2B_combined.png', save_loc, ob, tau))
+                    plotMsmtSpaceCombined(plotting_cloud, ...
+                                            plotting_truth, ...
+                                            zt{ob}, ...
+                                            h, ...
+                                            num_clouds_per_agent, ...
+                                            colors, ...
+                                            cloud_names, ...
+                                            sprintf('Az-El Timestep: %3.4f Hours (Posterior) Ob: %i', [tpr*time2hr, ob]), ...
+                                            sprintf('%s/Observer%i/Topo/Combined/Timestep_%i_2C_combined.png', save_loc, ob, tau), ...
+                                            msmt_exists)
+    
+                    plotting_cloud = cell(num_clouds_per_agent);
+                    for cloud = 1:num_clouds_per_agent
+                        plotting_cloud{cloud} = Topo2ECI(Xp_cloudp{ob, cloud}, tpr, obs_lat{ob}, obs_lon{ob});
+                    end
+                    plotting_truth = Topo2ECI(Xprop_truth{ob}, tpr, obs_lat{ob}, obs_lon{ob});
+                    plotStateSpaceCombined(plotting_cloud, ...
+                                            plotting_truth, ...
+                                            num_clouds_per_agent, ...
+                                            dist2km, ...
+                                            vel2kms, ...
+                                            colors, ...
+                                            cloud_names, ...
+                                            sprintf('Timestep: %3.4f Hours (Posterior) Ob: %i', [tpr*time2hr, ob]), ...
+                                            sprintf('%s/Observer%i/ECI/Combined/Timestep_%i_2B_combined.png', save_loc, ob, tau))
+    
+                    plotting_cloud = cell(num_clouds_per_agent);
+                    for cloud = 1:num_clouds_per_agent
+                        plotting_cloud{cloud} = backConvertSynodic(Xp_cloudp{ob, cloud}, tpr, obs_lat{ob}, obs_lon{ob});
+                    end
+                    plotting_truth = backConvertSynodic(Xprop_truth{ob}, tpr, obs_lat{ob}, obs_lon{ob});
+                    plotStateSpaceCombined(plotting_cloud, ...
+                                            plotting_truth, ...
+                                            num_clouds_per_agent, ...
+                                            dist2km, ...
+                                            vel2kms, ...
+                                            colors, ...
+                                            cloud_names, ...
+                                            sprintf('Timestep: %3.4f Hours (Posterior) Ob: %i', [tpr*time2hr, ob]), ...
+                                            sprintf('%s/Observer%i/Synodic/Combined/Timestep_%i_2B_combined.png', save_loc, ob, tau))
+                end
+            end
+        end
+        % if(1)
+        %{
+        if(idx_meas ~= 0)
+            K = Kn;
+        else
+            K = 1;
+        end
         %}
+    
+        %% Metrics
+        for ob = 1:num_agents
+            for cloud = 1:num_clouds_per_agent
+                if (tau + 2 == 20)
+                    tau
+                end
+                %if (truth_contained(ob, cloud) == 1)
+                if (msmt_exists)
+                    %wsum = 0;
+                    %for k = 1:K
+                    %    wsum = wsum + wp(k)*det(P_p{k});
+                    %end
+                    %ent2(tau+2) = log(wsum);
+                    metric_cloud = Topo2ECI(Xp_cloudp{ob, cloud}, tpr, obs_lat{ob}, obs_lon{ob});
+                    metric_truth = Topo2ECI(Xprop_truth{ob}, tpr, obs_lat{ob}, obs_lon{ob});
+                    %[truth_contained(ob, cloud), contained_failure_times(ob, cloud)] = checkIfInside(metric_cloud, metric_truth, tau);
+                    [likelihood_metric_state_space{ob, cloud}(tau+2), ent2_det_cov{ob, cloud}(tau+2), mahalanobis{ob, cloud}(tau+2), RMSE{ob, cloud}(tau+2, :), std_dev{ob, cloud}(tau+2, :), MC_std_dev{ob, cloud}(tau+2), mat_weight_metric{ob, cloud}(tau+2, :), MC_consistency{ob, cloud}(tau+2), num_cluster{ob, cloud}(tau+2), num_particles{ob, cloud}(tau+2)] = getStateSpaceMetrics(K{ob, cloud}, metric_cloud, metric_truth, cluster_by);
+                    [likelihood_metric_msmt_space{ob, cloud}(tau+2)] = getMsmtSpaceMetrics(K{ob, cloud}, Xp_cloudp{ob, cloud}, zt{ob}, h);
+                else
+                    if (tpr >= cVal{ob})
+                        Ke = Kmax; % Clusters used for calculating entropy
+                    else
+                        Ke = Kn; % Clusters used for calculating entropy
+                    end
+                    metric_cloud = Topo2ECI(Xp_cloudp{ob, cloud}, tpr, obs_lat{ob}, obs_lon{ob});
+                    metric_truth = Topo2ECI(Xprop_truth{ob}, tpr, obs_lat{ob}, obs_lon{ob});
+                    %[truth_contained(ob, cloud), contained_failure_times(ob, cloud)] = checkIfInside(metric_cloud, metric_truth, tau);
+                    [likelihood_metric_state_space{ob, cloud}(tau+2), ent2_det_cov{ob, cloud}(tau+2), mahalanobis{ob, cloud}(tau+2), RMSE{ob, cloud}(tau+2, :), std_dev{ob, cloud}(tau+2, :), MC_std_dev{ob, cloud}(tau+2), mat_weight_metric{ob, cloud}(tau+2, :), MC_consistency{ob, cloud}(tau+2), num_cluster{ob, cloud}(tau+2), num_particles{ob, cloud}(tau+2)] = getStateSpaceMetrics(Ke, metric_cloud, metric_truth, cluster_by); % Get entropy as if you still are using six clusters
+                end
+                %end
+            end
+        end
         
-        %%save("./Outside2/stdevs.mat", "ent1");
+        %% Fusion
+        if(fuse_orig_clouds(fusion_idx) == true && tau == time_of_fusion(fusion_idx))
+            disp("Fusing Clouds")
+            % Convert clouds to Synodic Frame
+            converted_cloud_1 = backConvertSynodic(Xp_cloudp{1, 1}, tpr, obs_lat{1}, obs_lon{1});
+            converted_cloud_2 = backConvertSynodic(Xp_cloudp{2, 1}, tpr, obs_lat{2}, obs_lon{2});
+            
+            % Fuse Clouds
+            [p3_simple, ~, weight_update_p3_1, weight_update_p3_2, fusion_bin_edges] = fusionMethods(converted_cloud_1, converted_cloud_2, cluster_by, Kmax, num_agents, Lp, disp_diagnostics, save_loc, dist2km, vel2kms, fusion_idx);
+            
+            % Resample Clouds
+            [p3_idx, p3_K, ~] = cluster(p3_simple, cluster_by, Kmax);
+            [~, p3_mu, p3_P, p3_w, ~] = calcGMMStatistics({p3_simple}, {p3_idx}, 1, 1, {p3_K}, Kmax);
+            p3_resampled = zeros(Lp, length(Xprop_truth{ob}));
+            for i = 1:Lp
+                [p3_resampled(i,:), ~] = drawFrom(p3_w{1}, p3_mu, p3_P); 
+            end
+    
+            % Convert clouds back to Topo Frame
+            Xp_cloudp{1, num_clouds_per_agent+1} = convertToTopo(p3_resampled, tpr, obs_lat{1}, obs_lon{1});
+            Xp_cloudp{1, num_clouds_per_agent+2} = convertToTopo(weight_update_p3_1, tpr, obs_lat{1}, obs_lon{1});
+            Xp_cloudp{2, num_clouds_per_agent+1} = convertToTopo(p3_resampled, tpr, obs_lat{2}, obs_lon{2});
+            Xp_cloudp{2, num_clouds_per_agent+2} = convertToTopo(weight_update_p3_2, tpr, obs_lat{2}, obs_lon{2});
+            cloud_names = [cloud_names, sprintf("%s %3.1f", fusion_types(2), tpr*time2hr), sprintf("%s %3.1f", fusion_types(3), tpr*time2hr)];
+            
+            % Add space for metrics of new clouds
+            for ob = 1:num_agents
+                for new_cloud = num_clouds_per_agent+1:num_clouds_per_agent + num_new_clouds_per_agent
+                    ent1{ob, new_cloud} = NaN(size(ent1{ob, 1}));
+                    ent2_det_cov{ob, new_cloud} = NaN(size(ent2_det_cov{ob, 1}));
+                    likelihood_metric_state_space{ob, new_cloud} = NaN(size(likelihood_metric_state_space{ob, 1}));
+                    likelihood_metric_msmt_space{ob, new_cloud} = NaN(size(likelihood_metric_msmt_space{ob, 1}));
+                    mahalanobis{ob, new_cloud} = NaN(size(mahalanobis{ob, 1}));
+                    RMSE{ob, new_cloud} = NaN(size(RMSE{ob, 1}));
+                    std_dev{ob, new_cloud} = NaN(size(std_dev{ob, 1}));
+                    MC_std_dev{ob, new_cloud} = NaN(size(MC_std_dev{ob, 1}));
+                    mat_weight_metric{ob, new_cloud} = NaN(size(mat_weight_metric{ob, 1}));
+                    orig_weight_metric{ob, new_cloud} = NaN(size(orig_weight_metric{ob, 1}));
+                    MC_consistency{ob, new_cloud} = NaN(size(MC_consistency{ob, 1}));
+                    num_cluster{ob, new_cloud} = NaN(size(num_cluster{ob, 1}));
+                    num_particles{ob, new_cloud} = NaN(size(num_particles{ob, 1}));
+                end
+            end
+            
+            fuse_orig_clouds(fusion_idx) = false;
+            num_clouds_per_agent = num_clouds_per_agent + num_new_clouds_per_agent;
+            fusion_idx = min(size(fuse_orig_clouds, 2), fusion_idx + 1);
+        end
+    
+    
+        %% Reset Number of Particles
+    
+        %if(abs(tpr - cTimes{1}(1)) < 1e-10)
+        %    Lp = 3000;
+        %elseif(abs(tpr - cTimes{1}(3)) < 1e-10)
+        %    Lp = 2000;
+        %end
     end
+    
+    %% Final Plots
+    
+    Xp_cloudp = cell(ob, num_clouds_per_agent);
+    c_id = cell(ob, num_clouds_per_agent);
+    for ob = 1:num_agents
+        x = 0:l_filt{ob}-1;
+        for cloud = 1:num_clouds_per_agent
+            fprintf('Final State Truth:\n')
+            disp(Xprop_truth{ob});
+            Xp_cloudp_temp = zeros(Lp, length(Xprop_truth{ob}));
+            c_id_temp = zeros(Lp,1);
+            for i = 1:Lp
+                [Xp_cloudp_temp(i,:), c_id_temp(i)] = drawFrom(wp{ob, cloud}, mu_p(ob, cloud, :), P_p(ob, cloud, :)); 
+            end
+            Xp_cloudp{ob, cloud} = Xp_cloudp_temp;
+            c_id{ob, cloud} = c_id_temp;
+            
+            ent1{ob, cloud}(end,:) = getDiagCov(Xp_cloudp{ob, cloud});
+        end
+    
+        % Plot the results
+        plotMetricsPerState(fig_num, x, std_dev(ob, :), dist2km, vel2kms, cloud_names, colors, save_loc, ob, 'Sigma', 'Standard Deviation', 'StdDev.png');
+        fig_num = fig_num + 1;
+        plotMetricsPerState(fig_num, x, RMSE(ob, :), dist2km, vel2kms, cloud_names, colors, save_loc, ob, 'RMSE', 'RMSE', 'RMSE.png');
+        fig_num = fig_num + 1;
+    
+        plotMetrics(fig_num, x, ent2_det_cov(ob, :), cloud_names, colors, save_loc, ob, 'Det Cov Entropy Metric', 'Det Cov Entropy Ob: %i', 'DetCovEntropy.png');
+        fig_num = fig_num + 1;
+        
+        plotMetrics(fig_num, x, likelihood_metric_state_space(ob, :), cloud_names, colors, save_loc, ob, 'Log-Likelihood Metric', 'Log-Likelihood Ob: %i', 'Likelihood.png');
+        fig_num = fig_num + 1;
+        plotMetrics(fig_num, x, likelihood_metric_msmt_space(ob, :), cloud_names, colors, save_loc, ob, 'Log-Likelihood Msmt Space', 'Log-Likelihood Ob: %i', 'MsmtLikelihood.png');
+        fig_num = fig_num + 1;
+    
+        plotMetrics(fig_num, x, mahalanobis(ob, :), cloud_names, colors, save_loc, ob, 'NEES', 'NEES Ob: %i', 'NEES.png');
+        fig_num = fig_num + 1;
+        plotMetrics(fig_num, x, MC_std_dev(ob, :), cloud_names, colors, save_loc, ob, 'Monte Carlo (Single Run) 2 Sigma Example', '2 Sigma Ob: %i', 'MC_2_sigma.png');
+        fig_num = fig_num + 1;
+        plotMetrics(fig_num, x, MC_consistency(ob, :), cloud_names, colors, save_loc, ob, 'Monte Carlo (Single Run) Consistency Example', 'Consistency Ob: %i', 'MC_consistency.png');
+        fig_num = fig_num + 1;
+        %plotMetrics(fig_num, x, RMSE(ob, :), cloud_names, colors, save_loc, ob, 'RMSE', 'RMSE Ob: %i', 'RMSE.png');
+        %fig_num = fig_num + 1;
+    
+        plotMetrics(fig_num, x, num_cluster(ob, :), cloud_names, colors, save_loc, ob, 'Number of Clusters', 'Number of Clusters Ob: %i', 'NumClusters.png');
+        fig_num = fig_num + 1;
+        plotMetrics(fig_num, x, num_particles(ob, :), cloud_names, colors, save_loc, ob, 'Number of Particles', 'Number of Particles Ob: %i', 'NumParticles.png');
+        fig_num = fig_num + 1;
+        
+        f = figure(fig_num);
+        fig_num = fig_num + 1;
+        f.WindowState = 'maximized';
+        hold on;
+        for cloud = 1:num_clouds_per_agent
+            %style = '--'; 
+            lw = 2;
+            %if cloud == chosen_method(ob)
+            %    style = '-'; lw = 3;
+            %end
+            plot(x, mat_weight_metric{ob, cloud}(:, 1), 'LineStyle', '--', 'Color', colors(cloud), 'LineWidth', lw);
+            plot(x, mat_weight_metric{ob, cloud}(:, 2), 'LineStyle', '-', 'Color', colors(cloud), 'LineWidth', lw);
+            plot(x, mat_weight_metric{ob, cloud}(:, 3), 'LineStyle', '--', 'Color', colors(cloud), 'LineWidth', lw);
+        end
+        %plot(x, num_particles{ob, 1}', x, num_particles{ob, 2}', x, num_particles{ob, 4}', x, num_particles{ob, 4}')
+        xlabel('Filter Step #')
+        ylabel('Min, Max, and Avg Weights')
+        title(sprintf('GMM Weights Ob: %i', ob))
+        %legend(cloud_names, 'Location', 'best')
+        hold off;
+        sg = sprintf('%s/Observer%i/%s.png', save_loc, ob, 'GMMWeights');
+        drawnow;
+        pause(0.5);
+        exportgraphics(f, sg, 'Resolution', 150);
+        close(f);
+    
+        f = figure(fig_num);
+        fig_num = fig_num + 1;
+        f.WindowState = 'maximized';
+        hold on;
+        for cloud = 1:num_clouds_per_agent
+            %style = '--'; 
+            lw = 2;
+            %if cloud == chosen_method(ob)
+            %    style = '-'; lw = 3;
+            %end
+            plot(x, orig_weight_metric{ob, cloud}(:, 1), 'LineStyle', '--', 'Color', colors(cloud), 'LineWidth', lw);
+            plot(x, orig_weight_metric{ob, cloud}(:, 2), 'LineStyle', '-', 'Color', colors(cloud), 'LineWidth', lw);
+            plot(x, orig_weight_metric{ob, cloud}(:, 3), 'LineStyle', '--', 'Color', colors(cloud), 'LineWidth', lw);
+        end
+        %plot(x, num_particles{ob, 1}', x, num_particles{ob, 2}', x, num_particles{ob, 4}', x, num_particles{ob, 4}')
+        xlabel('Filter Step #')
+        ylabel('Min, Max, and Avg Weights')
+        title(sprintf('GMM Prior Weights (via Clustering) Ob: %i', ob))
+        %legend(cloud_names, 'Location', 'best')
+        hold off;
+        sg = sprintf('%s/Observer%i/%s.png', save_loc, ob, 'PriorWeights');
+        drawnow;
+        pause(0.5);
+        exportgraphics(f, sg, 'Resolution', 150);
+        close(f);
+    
+        for cloud = 1:num_clouds_per_agent
+            % Plot the results
+            f = figure;
+            fig_num = fig_num + 1;
+            subplot(2,1,1)
+            hold on;
+            for k = 1:K{ob, cloud}
+                clusterPoints = Xp_cloudp{ob, cloud}(c_id{ob, cloud} == k, :);
+                mu_pExp(k,:) = mu_p{ob, cloud, k};
+                scatter3(clusterPoints(:,1), clusterPoints(:,2), clusterPoints(:,3), 'filled', 'MarkerFaceColor', colors(k));
+                hold on;
+            end
+            plot3(mu_pExp(:,1), mu_pExp(:,2), mu_pExp(:,3), 'k+', 'MarkerSize', 10, 'LineWidth', 3);
+            hold on;
+            plot3(Xprop_truth{ob}(1), Xprop_truth{ob}(2), Xprop_truth{ob}(3), 'x','MarkerSize', 20, 'LineWidth', 3)
+            title('Posterior Distribution (Position) Ob: %i', ob);
+            xlabel('X');
+            ylabel('Y');
+            zlabel('Z');
+            legend(legend_string);
+            grid on;
+            view(3);
+            hold off;
+            
+            subplot(2,1,2)
+            hold on;
+            for k = 1:K{ob, cloud}
+                clusterPoints = Xp_cloudp{ob, cloud}(c_id{ob, cloud} == k, :);
+                scatter3(clusterPoints(:,4), clusterPoints(:,5), clusterPoints(:,6), 'filled', 'MarkerFaceColor', colors(k));
+                hold on;
+            end
+            plot3(mu_pExp(:,4), mu_pExp(:,5), mu_pExp(:,6), 'k+', 'MarkerSize', 10, 'LineWidth', 3);
+            hold on;
+            plot3(Xprop_truth{ob}(4), Xprop_truth{ob}(5), Xprop_truth{ob}(6), 'x','MarkerSize', 20, 'LineWidth', 3)
+            title('Posterior Distribution (Velocity) Ob: %i', ob);
+            xlabel('Vx');
+            ylabel('Vy');
+            zlabel('Vz');
+            legend(legend_string);
+            grid on;
+            view(3);
+            hold off;
+            close(f);
+        
+            % Plot planar projections
+            f = figure;
+            fig_num = fig_num + 1;
+            set(gcf, 'units','normalized','outerposition',[0 0 1 1])
+            subplot(2,3,1)
+            for k = 1:K{ob, cloud}
+                clusterPoints = Xp_cloudp{ob, cloud}(c_id{ob, cloud} == k, :);
+                scatter(clusterPoints(:,1), clusterPoints(:,2), 'filled', 'MarkerFaceColor', colors(k));
+                hold on;
+            end
+            plot(mu_pExp(:,1), mu_pExp(:,2), '+', 'MarkerSize', 10, 'LineWidth', 3);
+            hold on;
+            plot(Xprop_truth{ob}(1), Xprop_truth{ob}(2), 'kx','MarkerSize', 20, 'LineWidth', 3)
+            title('X-Y');
+            xlabel('X');
+            ylabel('Y');
+            legend(legend_string);
+            hold off;
+            
+            subplot(2,3,2)
+            for k = 1:K{ob, cloud}
+                clusterPoints = Xp_cloudp{ob, cloud}(c_id{ob, cloud} == k, :);
+                scatter(clusterPoints(:,1), clusterPoints(:,3), 'filled', 'MarkerFaceColor', colors(k));
+                hold on;
+            end
+            plot(mu_pExp(:,1), mu_pExp(:,3), '+', 'MarkerSize', 10, 'LineWidth', 3);
+            hold on;
+            plot(Xprop_truth{ob}(1), Xprop_truth{ob}(3), 'kx','MarkerSize', 20, 'LineWidth', 3)
+            title('X-Z');
+            xlabel('X');
+            ylabel('Z');
+            legend(legend_string);
+            hold off;
+            
+            subplot(2,3,3)
+            for k = 1:K{ob, cloud}
+                clusterPoints = Xp_cloudp{ob, cloud}(c_id{ob, cloud} == k, :);
+                scatter(clusterPoints(:,2), clusterPoints(:,3), 'filled', 'MarkerFaceColor', colors(k));
+                hold on;
+            end
+            plot(mu_pExp(:,2), mu_pExp(:,3), '+', 'MarkerSize', 10, 'LineWidth', 3);
+            hold on;
+            plot(Xprop_truth{ob}(2), Xprop_truth{ob}(3), 'kx','MarkerSize', 20, 'LineWidth', 3)
+            title('Y-Z');
+            xlabel('Y');
+            ylabel('Z');
+            legend(legend_string);
+            hold off;
+            
+            subplot(2,3,4)
+            for k = 1:K{ob, cloud}
+                clusterPoints = Xp_cloudp{ob, cloud}(c_id{ob, cloud} == k, :);
+                scatter(clusterPoints(:,4), clusterPoints(:,5), 'filled', 'MarkerFaceColor', colors(k));
+                hold on;
+            end
+            plot(mu_pExp(:,4), mu_pExp(:,5), '+', 'MarkerSize', 10, 'LineWidth', 3);
+            hold on;
+            plot(Xprop_truth{ob}(4), Xprop_truth{ob}(5), 'kx','MarkerSize', 20, 'LineWidth', 3)
+            title('Xdot-Ydot');
+            xlabel('Xdot');
+            ylabel('Ydot');
+            legend(legend_string);
+            hold off;
+            
+            subplot(2,3,5)
+            for k = 1:K{ob, cloud}
+                clusterPoints = Xp_cloudp{ob, cloud}(c_id{ob, cloud} == k, :);
+                scatter(clusterPoints(:,4), clusterPoints(:,6), 'filled', 'MarkerFaceColor', colors(k));
+                hold on;
+            end
+            plot(mu_pExp(:,4), mu_pExp(:,6), '+', 'MarkerSize', 10, 'LineWidth', 3);
+            hold on;
+            plot(Xprop_truth{ob}(4), Xprop_truth{ob}(6), 'kx','MarkerSize', 20, 'LineWidth', 3)
+            title('Xdot-Zdot');
+            xlabel('Xdot');
+            ylabel('Zdot');
+            legend(legend_string);
+            hold off;
+            
+            subplot(2,3,6)
+            for k = 1:K{ob, cloud}
+                clusterPoints = Xp_cloudp{ob, cloud}(c_id{ob, cloud} == k, :);
+                scatter(clusterPoints(:,5), clusterPoints(:,6), 'filled', 'MarkerFaceColor', colors(k));
+                hold on;
+            end
+            plot(mu_pExp(:,5), mu_pExp(:,6), '+', 'MarkerSize', 10, 'LineWidth', 3);
+            hold on;
+            plot(Xprop_truth{ob}(5), Xprop_truth{ob}(6), 'kx','MarkerSize', 20, 'LineWidth', 3)
+            title('Ydot-Zdot');
+            xlabel('Ydot');
+            ylabel('Zdot');
+            legend(legend_string);
+            hold off;
+            
+            sg = sprintf('Timestamp: %1.5f Ob: %i', [tpr*time2hr, ob]);
+            sgtitle(sg)
+            saveas(gcf, save_loc + '/Observer' + num2str(ob) + '/finalDistribution_normK_cloud_' + num2str(cloud) + '.png', 'png');
+            close(f);
+            % savefig(gcf, 'nextObservedTracklet_normK.fig');
+            %}
+            
+            %%save("./Outside2/stdevs.mat", "ent1");
+        end
+    end
+    
+    save(save_loc + '/MC_consistency.mat', 'MC_consistency')
+    save(save_loc + '/MC_std_dev.mat', 'MC_std_dev')
+    
+    % Finish timer
+    toc
 end
-% Finish timer
-toc
-
 %% Misc Functions
 
 function Hx = linHx(mu)
@@ -2447,163 +2100,6 @@ function [mu_p, P_p] = kalmanUpdate(zk, Xcloud, R, mu_m, P_m, h)
 end
 
 
-% Kalman update for a single time step (with linearized measurement model)
-function [mu_p, P_p] = ekfUpdate(zk, H, R, mu_m, P_m, h)
-    Pxz = P_m*H';
-    Pzz = H*P_m*H' + R;
-    K_k = Pxz/Pzz;
-    % K_k = P_m*H'*(H*P_m*H' + R)^(-1); % Kalman gain
-
-    %{
-    ek = zk - h(mu_m);
-    if(ek(2) > pi)
-        ek(2) = ek(2) - 2*pi;
-    elseif(ek(2) < -pi)
-        ek(2) = ek(2) + 2*pi;
-    end
-    %}
-
-    mu_p = mu_m + K_k*(zk - h(mu_m));
-    % mu_p = mu_m + K_k*ek;
-    P_p = (eye(length(mu_m)) - K_k*H)*P_m;
-    % P_p = P_m - K_k*(H*P_m*H' + R)^(-1)*K_k';
-    % P_p = P_m - Pxz*K_k' - K_k*Pxz' + K_k*Pzz*K_k';
-    % P_p = (eye(length(mu_m)) - K_k*H)*P_m*(eye(length(mu_m)) - K_k*H)' + K_k*R*K_k'; % Joseph formula
-
-    % Ensure Kalman update is symmetric
-    P_p = (P_p + P_p')/2;
-end
-
-
-function [mu_c, P_c] = ukfProp(t_int, interval, mu_p, P_p)
-    % Generate 2L+1 sigma vectors
-    n = length(mu_p); % Length of state vector
-    alpha = 1e-3;
-    beta = 2;
-    kappa = 0;
-    lambda = alpha^2*(n + kappa) - n;
-
-    % Calculate square root factor
-    P_p = (P_p + P_p')/2;
-
-    [V, D] = eig(P_p);
-    D = max(D,0);
-    P_p = V*D*V';
-
-    S = chol(P_p, 'lower'); % Obtain SRF via Cholesky decomposition
-
-    sigs = zeros(2*n+1, n); % Matrix of sigma vectors
-
-    wm = zeros(1,2*n+1); % Vector of mean weights
-    wc = zeros(1,2*n+1); % Vector of covariance weights
-    
-    % Vectors and weights
-    sigs(1,:) = mu_p; 
-    wm(1) = lambda/(n + lambda);
-    wc(1) = lambda/(n + lambda) - (1 - alpha^2 + beta);
-
-    for i = 2:(n+1)
-        sigs(i,:) = (mu_p' + sqrt(n + lambda)*S(:,i-1))'; 
-        sigs(i+n,:) = (mu_p' - sqrt(n + lambda)*S(:,i-1))';
-
-        wm(i) = 0.5/(n + lambda); wm(i+n) = wm(i);
-        wc(i) = 0.5/(n + lambda); wc(i+n) = wc(i);
-    end
-    
-    prop_sigs = zeros(size(sigs));
-    % Propagation of sigma points
-    for i = 1:length(sigs(i,:))
-        prop_sigs(i,:) = propagate(sigs(i,:), t_int, interval);
-    end
-
-    % Get a priori mean
-    mu_c = zeros(n, 1);
-
-    for i = 1:(2*n+1)
-        mu_c = mu_c + wm(i)*prop_sigs(i,:);
-    end
-
-    P_c = zeros(size(P_p));
-    for i = 1:(2*n+1)
-        P_c = P_c + wc(i) * ((prop_sigs(i,:) - mu_c)*(prop_sigs(i,:) - mu_c)');
-    end
-    
-    P_c = (P_c + P_c')/2;
-
-    [V, D] = eig(P_c);
-    D = max(D,0);
-    P_c = V*D*V';
-end
-
-
-function [mu_p, P_p] = ukfUpdate(zk, R, mu_m, P_m, h)
-    % Generate 2L+1 sigma vectors
-    n = length(mu_m); % Length of state vector
-    alpha = 1e-3;
-    beta = 2;
-    kappa = 0;
-    lambda = alpha^2*(n + kappa) - n;
-
-    % Calculate square root factor
-    P_m = (P_m + P_m')/2;
-
-    [V, D] = eig(P_m);
-    D = max(D,0);
-    P_m = V*D*V';
-
-    S = chol(P_m, 'lower'); % Obtain SRF via Cholesky decomposition
-
-    sigs = zeros(2*n+1, n); % Matrix of sigma vectors
-    zetas = zeros(2*n+1, length(zk));
-
-    wm = zeros(1,2*n+1); % Vector of mean weights
-    wc = zeros(1,2*n+1); % Vector of covariance weights
-    
-    % Vectors and weights
-    sigs(1,:) = mu_m; 
-    zetas(1,:) = h(mu_m);
-    wm(1) = lambda/(n + lambda);
-    wc(1) = lambda/(n + lambda) - (1 - alpha^2 + beta);
-
-    for i = 2:(n+1)
-        sigs(i,:) = (mu_m' + sqrt(n + lambda)*S(:,i-1))'; 
-        sigs(i+n,:) = (mu_m' - sqrt(n + lambda)*S(:,i-1))';
-
-        zetas(i,:) = h(sigs(i,:)); zetas(i+n,:) = h(sigs(i+n,:));
-
-        wm(i) = 0.5/(n + lambda); wm(i+n) = wm(i);
-        wc(i) = 0.5/(n + lambda); wc(i+n) = wc(i);
-    end
-
-    Pxz = zeros(length(mu_m), length(zk));
-    Pzz = zeros(length(zk), length(zk));
-    mzk = zk*0.0;
-
-    for i = 1:(2*n+1)
-        mzk = mzk + wm(i)*zetas(i,:)';
-    end
-
-    for i = 1:(2*n+1)
-        Pzz = Pzz + wc(i)*(zetas(i,:)' - mzk)*(zetas(i,:)' - mzk)';
-        Pxz = Pxz + wc(i)*(sigs(i,:)' - mu_m')*(zetas(i,:)' - mzk)';
-    end
-    Pzz = Pzz + R;
-
-    % Compute optimal Kalman Gain
-    K_k = Pxz/Pzz;
-
-    % Update mean and covariances
-    mu_p = mu_m' + K_k*(zk - mzk);
-    % P_p = P_m - Pxz*K_k' - K_k*Pxz' + K_k*Pzz*K_k';
-    P_p = P_m - K_k*Pzz*K_k';
-    P_p = (P_p + P_p')/2;
-
-    [V, D] = eig(P_p);
-    D = max(D,0);
-    P_p = V*D*V';
-end
-
-
 function clipped_cloud = enforceCislunarBounds(Xm_cloud, t_prior, obs_lat, obs_lon, dist2km, vel2kms, low_lim, up_lim, vel_lim)
     clipped_cloud = [];
     reo = getObserverPos(t_prior, obs_lat, obs_lon);
@@ -2670,7 +2166,6 @@ function plotMetrics(fig_num, x, y_data, cloud_names, colors, save_loc, ob, y_la
 
     % Save
     save_path = sprintf('%s/Observer%i/%s', save_loc, ob, filename);
-    ensureDirExists(save_path)
     drawnow;
     pause(0.5); % Optional: allows rendering to complete before saving
     exportgraphics(f, save_path, 'Resolution', 150);
@@ -2749,7 +2244,6 @@ function plotMetricsPerState(fig_num, x, y_data, dist2km, vel2kms, cloud_names, 
     hold off
   
     save_path = sprintf('%s/Observer%i/%s', save_loc, ob, filename);
-    ensureDirExists(save_path)
     legend(cloud_names, 'Location', 'best')
     drawnow;
     pause(0.5);
@@ -2851,7 +2345,6 @@ function plotStateSpace(cloud, truth, K, cluster_idx, dist2km, vel2kms, colors, 
 
     %sgt = sprintf('Timestep: %3.4f Hours (Posterior) Ob: %i', [tpr*time2hr, ob]);
     sgtitle(plot_title);
-    ensureDirExists(filename)
     %sg = sprintf('%s/Observer%i/ECI/Timestep_%i_2B_eci_cloud_%i.png', save_loc, ob, tau, cloud);
     drawnow;
     pause(0.5);
@@ -2952,7 +2445,6 @@ function plotStateSpaceCombined(plotting_clouds, plotting_truth, num_clouds_per_
 
     %sgt = sprintf('Timestep: %3.4f Hours (Prior) Ob: %i', [tpr*time2hr, ob]);
     sgtitle(plot_title);
-    ensureDirExists(filename)
     %sg = sprintf('%s/Observer%i/Synodic/Timestep_%i_1B_synodic_combined.png', save_loc, ob, tau);
     drawnow;
     pause(0.5);
@@ -2992,7 +2484,6 @@ function plotMsmtSpace(cloud, truth, zt, h, K, cluster_idx, colors, plot_title, 
     ylabel('Elevation Angle (deg)')
 
     legend(legend_string);
-    ensureDirExists(filename)
     %sg = sprintf('%s/Observer%i/Timestep_%i_2C_cloud_%i.png', save_loc, ob, tau, cloud);
     drawnow;
     pause(0.5);
@@ -3026,7 +2517,6 @@ function plotMsmtSpaceCombined(plotting_clouds, plotting_truth, zt, h, num_cloud
     ylabel('Elevation Angle (deg)')
     
     legend(legend_string);
-    ensureDirExists(filename)
     %sg = sprintf('%s/Observer%i/Timestep_%i_1C_combined.png', save_loc, ob, tau);
     drawnow;
     pause(0.5);
@@ -3076,7 +2566,7 @@ end
 %}
 
 
-function [likelihood, ent_det_cov_orig, ent_det_cov, ent_diff_ent, ent_discr_ent, NEES, RMSE, std_dev, weights, Kp, Lp] = getStateSpaceMetrics(Kp, Xcloud, Xtruth, cluster_by)
+function [likelihood, ent_det_cov, NEES, RMSE, std_dev, MC_std_dev, weights, MC_consistency, Kp, Lp] = getStateSpaceMetrics(Kp, Xcloud, Xtruth, cluster_by)
     Kp = 8;
     if(cluster_by == "Range")
         msmt_cloud = zeros(length(Xcloud), 1);
@@ -3144,12 +2634,6 @@ function [likelihood, ent_det_cov_orig, ent_det_cov, ent_diff_ent, ent_discr_ent
         end
         w(k) = size(cluster_points, 1) / size(Xcloud, 1); % Vector of weights
     end
-
-    wsum = 0;
-    for k = 1:Kp
-        wsum = wsum + w(k)*det(P{k});
-    end
-    ent_det_cov_orig = log(wsum);
     
     Lp = length(Xcloud(:,1));
     %Kp
@@ -3182,14 +2666,31 @@ function [likelihood, ent_det_cov_orig, ent_det_cov, ent_diff_ent, ent_discr_ent
 
     std_dev = sqrt(diag(best_cov));
     ent_det_cov = log(gmm_unnorm.ComponentProportion(best_mode)*det(best_cov));
-    ent_det_cov_orig = 0;
-    ent_samples = 0; %random(gmm_unnorm, 1000000);
-    ent_diff_ent = 0; %-mean(log(pdf(gmm_unnorm, ent_samples) + 1e-300));
-    ent_discr_ent = 0;
 
     weights = [min(gmm_unnorm.ComponentProportion), mean(gmm_unnorm.ComponentProportion), max(gmm_unnorm.ComponentProportion)];
+
+    MC_consistency = consistencyMetric(gmm_unnorm.ComponentProportion', best_mode, Kp);
+    MC_std_dev = 0;
+    for k = 1:Kp
+        MC_std_dev = MC_std_dev + det(2*gmm_unnorm.Sigma(:, :, k));
+    end
 end
 
+function consistency = consistencyMetric(w, truth_gmm_idx, num_modes)
+    indicator = zeros(num_modes, 1);
+    indicator(truth_gmm_idx) = 1;
+    w_comp = 1 - w;
+    surprise = (indicator - w)' * (indicator - w);
+    expected_surprise = sum(w .* w_comp);
+    var_expected_surprise = sum(w .* w_comp .* (w_comp.^3 + w.^3)) - expected_surprise^2;
+
+    [wj, wk] = meshgrid(w, w);
+    weight_term = wj .* wk .* (wj + wk - 3 .* wj .* wk);
+    mask = ~eye(num_modes);
+    var_expected_surprise = var_expected_surprise + sum(weight_term(mask));
+
+    consistency = (surprise - expected_surprise) / sqrt(var_expected_surprise);
+end
 
 %{
 function [likelihood, ent_det_cov_orig, ent_det_cov, ent_diff_ent, ent_discr_ent, Dsum, RMSE, Kp, Lp] = getStateSpaceMetrics(Kp, Xcloud, Xtruth, cluster_by)
