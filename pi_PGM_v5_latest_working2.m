@@ -1,8 +1,8 @@
 % Start the clock
 clear all;
 tic
-for mc_idx = 2:2
-    clear all; close all;
+for mc_idx = 4:10
+    clearvars -except mc_idx; close all;
     rng(mc_idx, "twister")
     save_loc = "D:/PythonProjects/EDP/PGM/ParticleFusionTest/10_3_25_meeting/DilshadMetrics/Test1/MC_" + num2str(mc_idx);
     load_loc = "D:/PythonProjects/EDP/PGM/TestOrbits/2Obs/NRHO/TestOrbit2/Agent";
@@ -877,7 +877,7 @@ for mc_idx = 2:2
     likelihood_metric_msmt_space = cell(num_agents, num_clouds_per_agent);
     ent2_det_cov = cell(num_agents, num_clouds_per_agent);
     ent1 = cell(num_agents, num_clouds_per_agent);
-    mahalanobis = cell(num_agents, num_clouds_per_agent);
+    NEES = cell(num_agents, num_clouds_per_agent);
     RMSE = cell(num_agents, num_clouds_per_agent);
     std_dev = cell(num_agents, num_clouds_per_agent);
     MC_std_dev = cell(num_agents, num_clouds_per_agent);
@@ -892,7 +892,7 @@ for mc_idx = 2:2
             likelihood_metric_msmt_space{ob, cloud} = zeros(l_filt{ob},1);
             ent2_det_cov{ob, cloud} = zeros(l_filt{ob},1);
             ent1{ob, cloud} = zeros(l_filt{ob},length(mu_c{ob, cloud, 1})); 
-            mahalanobis{ob, cloud} = zeros(l_filt{ob}, 1);
+            NEES{ob, cloud} = zeros(l_filt{ob}, 1);
             RMSE{ob, cloud} = zeros(l_filt{ob}, 6);
             std_dev{ob, cloud} = zeros(l_filt{ob}, 6);
             MC_std_dev{ob, cloud} = zeros(l_filt{ob}, 1);
@@ -906,13 +906,13 @@ for mc_idx = 2:2
             metric_truth = Topo2ECI(Xot_truth{ob}', tpr{ob}, obs_lat{ob}, obs_lon{ob});
     
             %[truth_contained(ob, cloud), contained_failure_times(ob, cloud)] = checkIfInside(metric_cloud, metric_truth, 1);
-            [likelihood_metric_state_space{ob, cloud}(1), ent2_det_cov{ob, cloud}(1), mahalanobis{ob, cloud}(1), RMSE{ob, cloud}(1, :), std_dev{ob, cloud}(1, :), MC_std_dev{ob, cloud}(1), mat_weight_metric{ob, cloud}(1, :), MC_consistency{ob, cloud}(1), num_cluster{ob, cloud}(1), num_particles{ob, cloud}(1)] = getStateSpaceMetrics(1, metric_cloud, metric_truth, cluster_by);
+            [likelihood_metric_state_space{ob, cloud}(1), ent2_det_cov{ob, cloud}(1), NEES{ob, cloud}(1), RMSE{ob, cloud}(1, :), std_dev{ob, cloud}(1, :), MC_std_dev{ob, cloud}(1), mat_weight_metric{ob, cloud}(1, :), MC_consistency{ob, cloud}(1), num_cluster{ob, cloud}(1), num_particles{ob, cloud}(1)] = getStateSpaceMetrics(1, metric_cloud, metric_truth, cluster_by);
             
             metric_cloud = Topo2ECI(Xp_cloud{ob, cloud}, tpr{ob}, obs_lat{ob}, obs_lon{ob});
             metric_truth = Topo2ECI(Xprop_truth{ob}, tpr{ob}, obs_lat{ob}, obs_lon{ob});
     
             %[truth_contained(ob, cloud), contained_failure_times(ob, cloud)] = checkIfInside(metric_cloud, metric_truth, 2);
-            [likelihood_metric_state_space{ob, cloud}(2), ent2_det_cov{ob, cloud}(2), mahalanobis{ob, cloud}(2), RMSE{ob, cloud}(2, :), std_dev{ob, cloud}(2, :), MC_std_dev{ob, cloud}(2), mat_weight_metric{ob, cloud}(2, :), MC_consistency{ob, cloud}(2), num_cluster{ob, cloud}(2), num_particles{ob, cloud}(2)] = getStateSpaceMetrics(K{ob, cloud}, metric_cloud, metric_truth, cluster_by);%log(det(cov(Xp_cloud)));
+            [likelihood_metric_state_space{ob, cloud}(2), ent2_det_cov{ob, cloud}(2), NEES{ob, cloud}(2), RMSE{ob, cloud}(2, :), std_dev{ob, cloud}(2, :), MC_std_dev{ob, cloud}(2), mat_weight_metric{ob, cloud}(2, :), MC_consistency{ob, cloud}(2), num_cluster{ob, cloud}(2), num_particles{ob, cloud}(2)] = getStateSpaceMetrics(K{ob, cloud}, metric_cloud, metric_truth, cluster_by);%log(det(cov(Xp_cloud)));
             ent1{ob, cloud}(1,:) = getDiagCov(X0cloud{ob, cloud});
         end
     end
@@ -1343,7 +1343,7 @@ for mc_idx = 2:2
                     metric_cloud = Topo2ECI(Xp_cloudp{ob, cloud}, tpr, obs_lat{ob}, obs_lon{ob});
                     metric_truth = Topo2ECI(Xprop_truth{ob}, tpr, obs_lat{ob}, obs_lon{ob});
                     %[truth_contained(ob, cloud), contained_failure_times(ob, cloud)] = checkIfInside(metric_cloud, metric_truth, tau);
-                    [likelihood_metric_state_space{ob, cloud}(tau+2), ent2_det_cov{ob, cloud}(tau+2), mahalanobis{ob, cloud}(tau+2), RMSE{ob, cloud}(tau+2, :), std_dev{ob, cloud}(tau+2, :), MC_std_dev{ob, cloud}(tau+2), mat_weight_metric{ob, cloud}(tau+2, :), MC_consistency{ob, cloud}(tau+2), num_cluster{ob, cloud}(tau+2), num_particles{ob, cloud}(tau+2)] = getStateSpaceMetrics(K{ob, cloud}, metric_cloud, metric_truth, cluster_by);
+                    [likelihood_metric_state_space{ob, cloud}(tau+2), ent2_det_cov{ob, cloud}(tau+2), NEES{ob, cloud}(tau+2), RMSE{ob, cloud}(tau+2, :), std_dev{ob, cloud}(tau+2, :), MC_std_dev{ob, cloud}(tau+2), mat_weight_metric{ob, cloud}(tau+2, :), MC_consistency{ob, cloud}(tau+2), num_cluster{ob, cloud}(tau+2), num_particles{ob, cloud}(tau+2)] = getStateSpaceMetrics(K{ob, cloud}, metric_cloud, metric_truth, cluster_by);
                     [likelihood_metric_msmt_space{ob, cloud}(tau+2)] = getMsmtSpaceMetrics(K{ob, cloud}, Xp_cloudp{ob, cloud}, zt{ob}, h);
                 else
                     if (tpr >= cVal{ob})
@@ -1354,7 +1354,7 @@ for mc_idx = 2:2
                     metric_cloud = Topo2ECI(Xp_cloudp{ob, cloud}, tpr, obs_lat{ob}, obs_lon{ob});
                     metric_truth = Topo2ECI(Xprop_truth{ob}, tpr, obs_lat{ob}, obs_lon{ob});
                     %[truth_contained(ob, cloud), contained_failure_times(ob, cloud)] = checkIfInside(metric_cloud, metric_truth, tau);
-                    [likelihood_metric_state_space{ob, cloud}(tau+2), ent2_det_cov{ob, cloud}(tau+2), mahalanobis{ob, cloud}(tau+2), RMSE{ob, cloud}(tau+2, :), std_dev{ob, cloud}(tau+2, :), MC_std_dev{ob, cloud}(tau+2), mat_weight_metric{ob, cloud}(tau+2, :), MC_consistency{ob, cloud}(tau+2), num_cluster{ob, cloud}(tau+2), num_particles{ob, cloud}(tau+2)] = getStateSpaceMetrics(Ke, metric_cloud, metric_truth, cluster_by); % Get entropy as if you still are using six clusters
+                    [likelihood_metric_state_space{ob, cloud}(tau+2), ent2_det_cov{ob, cloud}(tau+2), NEES{ob, cloud}(tau+2), RMSE{ob, cloud}(tau+2, :), std_dev{ob, cloud}(tau+2, :), MC_std_dev{ob, cloud}(tau+2), mat_weight_metric{ob, cloud}(tau+2, :), MC_consistency{ob, cloud}(tau+2), num_cluster{ob, cloud}(tau+2), num_particles{ob, cloud}(tau+2)] = getStateSpaceMetrics(Ke, metric_cloud, metric_truth, cluster_by); % Get entropy as if you still are using six clusters
                 end
                 %end
             end
@@ -1392,7 +1392,7 @@ for mc_idx = 2:2
                     ent2_det_cov{ob, new_cloud} = NaN(size(ent2_det_cov{ob, 1}));
                     likelihood_metric_state_space{ob, new_cloud} = NaN(size(likelihood_metric_state_space{ob, 1}));
                     likelihood_metric_msmt_space{ob, new_cloud} = NaN(size(likelihood_metric_msmt_space{ob, 1}));
-                    mahalanobis{ob, new_cloud} = NaN(size(mahalanobis{ob, 1}));
+                    NEES{ob, new_cloud} = NaN(size(NEES{ob, 1}));
                     RMSE{ob, new_cloud} = NaN(size(RMSE{ob, 1}));
                     std_dev{ob, new_cloud} = NaN(size(std_dev{ob, 1}));
                     MC_std_dev{ob, new_cloud} = NaN(size(MC_std_dev{ob, 1}));
@@ -1453,7 +1453,7 @@ for mc_idx = 2:2
         plotMetrics(fig_num, x, likelihood_metric_msmt_space(ob, :), cloud_names, colors, save_loc, ob, 'Log-Likelihood Msmt Space', 'Log-Likelihood Ob: %i', 'MsmtLikelihood.png');
         fig_num = fig_num + 1;
     
-        plotMetrics(fig_num, x, mahalanobis(ob, :), cloud_names, colors, save_loc, ob, 'NEES', 'NEES Ob: %i', 'NEES.png');
+        plotMetrics(fig_num, x, NEES(ob, :), cloud_names, colors, save_loc, ob, 'NEES', 'NEES Ob: %i', 'NEES.png');
         fig_num = fig_num + 1;
         plotMetrics(fig_num, x, MC_std_dev(ob, :), cloud_names, colors, save_loc, ob, 'Monte Carlo (Single Run) 2 Sigma Example', '2 Sigma Ob: %i', 'MC_2_sigma.png');
         fig_num = fig_num + 1;
@@ -1669,8 +1669,14 @@ for mc_idx = 2:2
     end
     
     save(save_loc + '/MC_consistency.mat', 'MC_consistency')
-    save(save_loc + '/MC_std_dev.mat', 'MC_std_dev')
-    
+    %save(save_loc + '/MC_std_dev.mat', 'MC_std_dev')
+    save(save_loc + '/std_dev_per_state.mat', 'std_dev')
+    save(save_loc + '/RMSE.mat', 'RMSE')
+    save(save_loc + '/Entropy.mat', 'ent2_det_cov')
+    save(save_loc + '/Likelihood_state.mat', 'likelihood_metric_state_space')
+    save(save_loc + '/Likelihood_msmt.mat', 'likelihood_metric_msmt_space')
+    save(save_loc + '/Num_cluster.mat', 'num_cluster')
+    save(save_loc + '/std_dev_per_state.mat', 'std_dev')
     % Finish timer
     toc
 end
