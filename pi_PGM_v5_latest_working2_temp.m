@@ -4,7 +4,7 @@ tic
 for mc_idx = 4:4
     clearvars -except mc_idx; close all;
     rng(mc_idx, "twister")
-    save_loc = "D:/PythonProjects/EDP/PGM/ParticleFusionTest/10_3_25_meeting/MultiMsmtScheme/scrap/MC_" + num2str(mc_idx);
+    save_loc = "D:/PythonProjects/EDP/PGM/ParticleFusionTest/10_3_25_meeting/MultiMsmtScheme/scrap3/MC_" + num2str(mc_idx);
     load_loc = "D:/PythonProjects/EDP/PGM/TestOrbits/2Obs/NRHO/TestOrbit2/Agent";
     
     cluster_by = "FullState";
@@ -89,7 +89,10 @@ for mc_idx = 4:4
     total_num_clouds = 1 + num_new_clouds_per_agent * sum(fuse_orig_clouds);
     likelihood_metric_state_space = repmat({NaN(num_timesteps, 1)}, total_num_agents, total_num_clouds);
     likelihood_metric_msmt_space = repmat({NaN(num_timesteps, 1)}, total_num_agents, total_num_clouds);
+    best_ent2_det_cov = repmat({NaN(num_timesteps, 1)}, total_num_agents, total_num_clouds);
     ent2_det_cov = repmat({NaN(num_timesteps, 1)}, total_num_agents, total_num_clouds);
+    best_ent2_det_cov_msmt = repmat({NaN(num_timesteps, 1)}, total_num_agents, total_num_clouds);
+    ent2_det_cov_msmt = repmat({NaN(num_timesteps, 1)}, total_num_agents, total_num_clouds);
     ent1 = repmat({NaN(num_timesteps, 6)}, total_num_agents, total_num_clouds);
     NEES = repmat({NaN(num_timesteps, 1)}, total_num_agents, total_num_clouds);
     RMSE = repmat({NaN(num_timesteps, 6)}, total_num_agents, total_num_clouds);
@@ -135,8 +138,8 @@ for mc_idx = 4:4
                 agent_is_active(ob) = true;
                 metric_cloud = Topo2ECI(X0cloud, t_prev, obs_lat{ob}, obs_lon{ob});
                 metric_truth = Topo2ECI(combined_state_data(ts, 2:end, ob), t_prev, obs_lat{ob}, obs_lon{ob});
-                [likelihood_metric_state_space{ob, 1}(ts), ent2_det_cov{ob, 1}(ts), NEES{ob, 1}(ts), RMSE{ob, 1}(ts, :), std_dev{ob, 1}(ts, :), MC_std_dev{ob, 1}(ts), mat_weight_metric{ob, 1}(ts, :), MC_consistency{ob, 1}(ts), num_cluster{ob, 1}(ts), num_particles{ob, 1}(ts)] = getStateSpaceMetrics(K{ob, 1}, metric_cloud, metric_truth, cluster_by);
-                [likelihood_metric_msmt_space{ob, 1}(ts)] = getMsmtSpaceMetrics(K{ob, 1}, metric_cloud, metric_truth, h);
+                [likelihood_metric_state_space{ob, 1}(ts), best_ent2_det_cov{ob, 1}(ts), ent2_det_cov{ob, 1}(ts), NEES{ob, 1}(ts), RMSE{ob, 1}(ts, :), std_dev{ob, 1}(ts, :), MC_std_dev{ob, 1}(ts), mat_weight_metric{ob, 1}(ts, :), MC_consistency{ob, 1}(ts), num_cluster{ob, 1}(ts), num_particles{ob, 1}(ts)] = getStateSpaceMetrics(K{ob, 1}, metric_cloud, metric_truth, cluster_by);
+                [likelihood_metric_msmt_space{ob, 1}(ts), best_ent2_det_cov_msmt{ob, cloud}(ts), ent2_det_cov_msmt{ob, cloud}(ts)] = getMsmtSpaceMetrics(K{ob, 1}, X0cloud, combined_state_data(ts, 2:end, ob), h);
 
                 Xp_cloudp{ob, 1} = X0cloud;
             end
@@ -243,7 +246,7 @@ for mc_idx = 4:4
             end
             Xprop_truth{ob} = propagate(Xprop_truth{ob}, t_prev, interval, obs_lat{ob}, obs_lon{ob});
         end
-
+        fprintf("Timestamp: %1.5f\n", t_prior*time2hr);
 
         %% Update Step
         %cPoints = cell(num_agents, num_clouds_per_agent, Kmax);
@@ -266,9 +269,6 @@ for mc_idx = 4:4
                         [idx{ob, cloud}, K{ob, cloud}, ~] = cluster(Xm_cloud{ob, cloud}, cluster_by, K{ob, cloud});
                     end
 
-            
-                    fprintf("Timestamp: %1.5f\n", t_prior*time2hr);
-                    
                     mu_p = cell(1, num_clouds_per_agent(ob), Kmax);
                     P_p = cell(1, num_clouds_per_agent(ob), Kmax);
                     [cPoints, mu_c, P_c, wm, wp] = calcGMMStatistics(Xm_cloud(ob, :), idx(ob, :), num_clouds_per_agent(ob), K(ob, :), Kmax);
@@ -302,8 +302,8 @@ for mc_idx = 4:4
                         %% Metric Calculations
                         metric_cloud = Topo2ECI(Xp_cloudp{ob, cloud}, t_prior, obs_lat{ob}, obs_lon{ob});
                         metric_truth = Topo2ECI(Xprop_truth{ob}, t_prior, obs_lat{ob}, obs_lon{ob});
-                        [likelihood_metric_state_space{ob, cloud}(ts+1), ent2_det_cov{ob, cloud}(ts+1), NEES{ob, cloud}(ts+1), RMSE{ob, cloud}(ts+1, :), std_dev{ob, cloud}(ts+1, :), MC_std_dev{ob, cloud}(ts+1), mat_weight_metric{ob, cloud}(ts+1, :), MC_consistency{ob, cloud}(ts+1), num_cluster{ob, cloud}(ts+1), num_particles{ob, cloud}(ts+1)] = getStateSpaceMetrics(K{ob, cloud}, metric_cloud, metric_truth, cluster_by);
-                        [likelihood_metric_msmt_space{ob, cloud}(ts+1)] = getMsmtSpaceMetrics(K{ob, cloud}, Xp_cloudp{ob, cloud}, metric_truth, h);
+                        [likelihood_metric_state_space{ob, cloud}(ts+1), best_ent2_det_cov{ob, cloud}(ts+1), ent2_det_cov{ob, cloud}(ts+1), NEES{ob, cloud}(ts+1), RMSE{ob, cloud}(ts+1, :), std_dev{ob, cloud}(ts+1, :), MC_std_dev{ob, cloud}(ts+1), mat_weight_metric{ob, cloud}(ts+1, :), MC_consistency{ob, cloud}(ts+1), num_cluster{ob, cloud}(ts+1), num_particles{ob, cloud}(ts+1)] = getStateSpaceMetrics(K{ob, cloud}, metric_cloud, metric_truth, cluster_by);
+                        [likelihood_metric_msmt_space{ob, cloud}(ts+1), best_ent2_det_cov_msmt{ob, cloud}(ts+1), ent2_det_cov_msmt{ob, cloud}(ts+1)] = getMsmtSpaceMetrics(K{ob, cloud}, Xp_cloudp{ob, cloud}, Xprop_truth{ob}, h);
                     end
 
                 else
@@ -329,7 +329,8 @@ for mc_idx = 4:4
                         %% Metric Calculations
                         metric_cloud = Topo2ECI(Xp_cloudp{ob, cloud}, t_prior, obs_lat{ob}, obs_lon{ob});
                         metric_truth = Topo2ECI(Xprop_truth{ob}, t_prior, obs_lat{ob}, obs_lon{ob});
-                        [likelihood_metric_state_space{ob, cloud}(ts+1), ent2_det_cov{ob, cloud}(ts+1), NEES{ob, cloud}(ts+1), RMSE{ob, cloud}(ts+1, :), std_dev{ob, cloud}(ts+1, :), MC_std_dev{ob, cloud}(ts+1), mat_weight_metric{ob, cloud}(ts+1, :), MC_consistency{ob, cloud}(ts+1), num_cluster{ob, cloud}(ts+1), num_particles{ob, cloud}(ts+1)] = getStateSpaceMetrics(Kmax, metric_cloud, metric_truth, cluster_by);
+                        [likelihood_metric_state_space{ob, cloud}(ts+1), best_ent2_det_cov{ob, cloud}(ts+1), ent2_det_cov{ob, cloud}(ts+1), NEES{ob, cloud}(ts+1), RMSE{ob, cloud}(ts+1, :), std_dev{ob, cloud}(ts+1, :), MC_std_dev{ob, cloud}(ts+1), mat_weight_metric{ob, cloud}(ts+1, :), MC_consistency{ob, cloud}(ts+1), num_cluster{ob, cloud}(ts+1), num_particles{ob, cloud}(ts+1)] = getStateSpaceMetrics(Kmax, metric_cloud, metric_truth, cluster_by);
+                        [likelihood_metric_msmt_space{ob, cloud}(ts+1), best_ent2_det_cov_msmt{ob, 1}(ts+1), ent2_det_cov_msmt{ob, 1}(ts+1)] = getMsmtSpaceMetrics(K{ob, cloud}, Xp_cloudp{ob, cloud}, Xprop_truth{ob}, h);
                     end
                 end
             end
@@ -650,7 +651,13 @@ for mc_idx = 4:4
         plotMetricsPerState(fig_num, x, RMSE(ob, :), dist2km, vel2kms, cloud_names, colors, save_loc, ob, 'RMSE', 'RMSE', 'RMSE.png');
         fig_num = fig_num + 1;
     
-        plotMetrics(fig_num, x, ent2_det_cov(ob, :), cloud_names, colors, save_loc, ob, 'Det Cov Entropy Metric', 'Det Cov Entropy Ob: %i', 'DetCovEntropy.png');
+        plotMetrics(fig_num, x, best_ent2_det_cov(ob, :), cloud_names, colors, save_loc, ob, 'Best Mode Entropy', 'Best Mode Entropy (State Space) Ob: %i', 'BestEntropyState.png');
+        fig_num = fig_num + 1;
+        plotMetrics(fig_num, x, ent2_det_cov(ob, :), cloud_names, colors, save_loc, ob, 'Weighted Entropy', 'Weighted Entropy (State Space) Ob: %i', 'WeightedEntropyState.png');
+        fig_num = fig_num + 1;
+        plotMetrics(fig_num, x, best_ent2_det_cov_msmt(ob, :), cloud_names, colors, save_loc, ob, 'Best Mode Entropy Metric', 'Best Mode Entropy (Msmt Space) Ob: %i', 'BestEntropyMsmt.png');
+        fig_num = fig_num + 1;
+        plotMetrics(fig_num, x, ent2_det_cov_msmt(ob, :), cloud_names, colors, save_loc, ob, 'Weighted Entropy Metric', 'Weighted Entropy (Msmt Space) Ob: %i', 'WeightedEntropyMsmt.png');
         fig_num = fig_num + 1;
         
         plotMetrics(fig_num, x, likelihood_metric_state_space(ob, :), cloud_names, colors, save_loc, ob, 'Log-Likelihood Metric', 'Log-Likelihood Ob: %i', 'Likelihood.png');
@@ -723,7 +730,7 @@ for mc_idx = 4:4
         pause(0.5);
         exportgraphics(f, sg, 'Resolution', 150);
         close(f);
-    
+        legend_string = ['Cloud', 'Truth']
         for cloud = 1:num_clouds_per_agent(ob)
             % Plot the results
             f = figure;
@@ -732,11 +739,11 @@ for mc_idx = 4:4
             hold on;
             for k = 1:K{ob, cloud}
                 clusterPoints = Xp_cloudp{ob, cloud}(c_id{ob, cloud} == k, :);
-                mu_pExp(k,:) = mu_p{ob, cloud, k};
+                %mu_pExp(k,:) = mu_p{ob, cloud, k};
                 scatter3(clusterPoints(:,1), clusterPoints(:,2), clusterPoints(:,3), 'filled', 'MarkerFaceColor', colors(k));
                 hold on;
             end
-            plot3(mu_pExp(:,1), mu_pExp(:,2), mu_pExp(:,3), 'k+', 'MarkerSize', 10, 'LineWidth', 3);
+            %plot3(mu_pExp(:,1), mu_pExp(:,2), mu_pExp(:,3), 'k+', 'MarkerSize', 10, 'LineWidth', 3);
             hold on;
             plot3(Xprop_truth{ob}(1), Xprop_truth{ob}(2), Xprop_truth{ob}(3), 'x','MarkerSize', 20, 'LineWidth', 3)
             title('Posterior Distribution (Position) Ob: %i', ob);
@@ -755,7 +762,7 @@ for mc_idx = 4:4
                 scatter3(clusterPoints(:,4), clusterPoints(:,5), clusterPoints(:,6), 'filled', 'MarkerFaceColor', colors(k));
                 hold on;
             end
-            plot3(mu_pExp(:,4), mu_pExp(:,5), mu_pExp(:,6), 'k+', 'MarkerSize', 10, 'LineWidth', 3);
+            %plot3(mu_pExp(:,4), mu_pExp(:,5), mu_pExp(:,6), 'k+', 'MarkerSize', 10, 'LineWidth', 3);
             hold on;
             plot3(Xprop_truth{ob}(4), Xprop_truth{ob}(5), Xprop_truth{ob}(6), 'x','MarkerSize', 20, 'LineWidth', 3)
             title('Posterior Distribution (Velocity) Ob: %i', ob);
@@ -778,7 +785,7 @@ for mc_idx = 4:4
                 scatter(clusterPoints(:,1), clusterPoints(:,2), 'filled', 'MarkerFaceColor', colors(k));
                 hold on;
             end
-            plot(mu_pExp(:,1), mu_pExp(:,2), '+', 'MarkerSize', 10, 'LineWidth', 3);
+            %plot(mu_pExp(:,1), mu_pExp(:,2), '+', 'MarkerSize', 10, 'LineWidth', 3);
             hold on;
             plot(Xprop_truth{ob}(1), Xprop_truth{ob}(2), 'kx','MarkerSize', 20, 'LineWidth', 3)
             title('X-Y');
@@ -793,7 +800,7 @@ for mc_idx = 4:4
                 scatter(clusterPoints(:,1), clusterPoints(:,3), 'filled', 'MarkerFaceColor', colors(k));
                 hold on;
             end
-            plot(mu_pExp(:,1), mu_pExp(:,3), '+', 'MarkerSize', 10, 'LineWidth', 3);
+            %plot(mu_pExp(:,1), mu_pExp(:,3), '+', 'MarkerSize', 10, 'LineWidth', 3);
             hold on;
             plot(Xprop_truth{ob}(1), Xprop_truth{ob}(3), 'kx','MarkerSize', 20, 'LineWidth', 3)
             title('X-Z');
@@ -808,7 +815,7 @@ for mc_idx = 4:4
                 scatter(clusterPoints(:,2), clusterPoints(:,3), 'filled', 'MarkerFaceColor', colors(k));
                 hold on;
             end
-            plot(mu_pExp(:,2), mu_pExp(:,3), '+', 'MarkerSize', 10, 'LineWidth', 3);
+            %plot(mu_pExp(:,2), mu_pExp(:,3), '+', 'MarkerSize', 10, 'LineWidth', 3);
             hold on;
             plot(Xprop_truth{ob}(2), Xprop_truth{ob}(3), 'kx','MarkerSize', 20, 'LineWidth', 3)
             title('Y-Z');
@@ -823,7 +830,7 @@ for mc_idx = 4:4
                 scatter(clusterPoints(:,4), clusterPoints(:,5), 'filled', 'MarkerFaceColor', colors(k));
                 hold on;
             end
-            plot(mu_pExp(:,4), mu_pExp(:,5), '+', 'MarkerSize', 10, 'LineWidth', 3);
+            %plot(mu_pExp(:,4), mu_pExp(:,5), '+', 'MarkerSize', 10, 'LineWidth', 3);
             hold on;
             plot(Xprop_truth{ob}(4), Xprop_truth{ob}(5), 'kx','MarkerSize', 20, 'LineWidth', 3)
             title('Xdot-Ydot');
@@ -838,7 +845,7 @@ for mc_idx = 4:4
                 scatter(clusterPoints(:,4), clusterPoints(:,6), 'filled', 'MarkerFaceColor', colors(k));
                 hold on;
             end
-            plot(mu_pExp(:,4), mu_pExp(:,6), '+', 'MarkerSize', 10, 'LineWidth', 3);
+            %plot(mu_pExp(:,4), mu_pExp(:,6), '+', 'MarkerSize', 10, 'LineWidth', 3);
             hold on;
             plot(Xprop_truth{ob}(4), Xprop_truth{ob}(6), 'kx','MarkerSize', 20, 'LineWidth', 3)
             title('Xdot-Zdot');
@@ -853,7 +860,7 @@ for mc_idx = 4:4
                 scatter(clusterPoints(:,5), clusterPoints(:,6), 'filled', 'MarkerFaceColor', colors(k));
                 hold on;
             end
-            plot(mu_pExp(:,5), mu_pExp(:,6), '+', 'MarkerSize', 10, 'LineWidth', 3);
+            %plot(mu_pExp(:,5), mu_pExp(:,6), '+', 'MarkerSize', 10, 'LineWidth', 3);
             hold on;
             plot(Xprop_truth{ob}(5), Xprop_truth{ob}(6), 'kx','MarkerSize', 20, 'LineWidth', 3)
             title('Ydot-Zdot');
@@ -877,7 +884,10 @@ for mc_idx = 4:4
     %save(save_loc + '/MC_std_dev.mat', 'MC_std_dev')
     save(save_loc + '/std_dev_per_state.mat', 'std_dev')
     save(save_loc + '/RMSE.mat', 'RMSE')
-    save(save_loc + '/Entropy.mat', 'ent2_det_cov')
+    save(save_loc + '/BestEntropyState.mat', 'best_ent2_det_cov')
+    save(save_loc + '/WeightedEntropyState.mat', 'ent2_det_cov')
+    save(save_loc + '/BestEntropyMsmt.mat', 'best_ent2_det_cov_msmt')
+    save(save_loc + '/WeightedEntropyMsmt.mat', 'ent2_det_cov_msmt')
     save(save_loc + '/Likelihood_state.mat', 'likelihood_metric_state_space')
     save(save_loc + '/Likelihood_msmt.mat', 'likelihood_metric_msmt_space')
     save(save_loc + '/Num_cluster.mat', 'num_cluster')
@@ -1796,7 +1806,7 @@ end
 %}
 
 
-function [likelihood, ent_det_cov, NEES, RMSE, std_dev, MC_std_dev, weights, MC_consistency, Kp, Lp] = getStateSpaceMetrics(Kp, Xcloud, Xtruth, cluster_by)
+function [likelihood, best_ent_det_cov, ent_det_cov, NEES, RMSE, std_dev, MC_std_dev, weights, MC_consistency, Kp, Lp] = getStateSpaceMetrics(Kp, Xcloud, Xtruth, cluster_by)
     Kp = 8;
     if(cluster_by == "Range")
         msmt_cloud = zeros(length(Xcloud), 1);
@@ -1895,7 +1905,12 @@ function [likelihood, ent_det_cov, NEES, RMSE, std_dev, MC_std_dev, weights, MC_
     RMSE = sqrt(mean((best_samples - Xtruth).^2, 1));
 
     std_dev = sqrt(diag(best_cov));
-    ent_det_cov = log(gmm_unnorm.ComponentProportion(best_mode)*det(best_cov));
+    best_ent_det_cov = log(gmm_unnorm.ComponentProportion(best_mode)*det(best_cov));
+    ent_det_cov = 0;
+    for k = 1:Kp
+        ent_det_cov = ent_det_cov + gmm_unnorm.ComponentProportion(k)*det(gmm_unnorm.Sigma(:, :, k));
+    end
+    ent_det_cov = log(ent_det_cov);
 
     weights = [min(gmm_unnorm.ComponentProportion), mean(gmm_unnorm.ComponentProportion), max(gmm_unnorm.ComponentProportion)];
 
@@ -2041,7 +2056,7 @@ function [likelihood, ent_det_cov_orig, ent_det_cov, ent_diff_ent, ent_discr_ent
 end
 %}
 
-function [likelihood] = getMsmtSpaceMetrics(Kp, Xcloud, Xtruth, h)
+function [likelihood, best_ent_det_cov, ent_det_cov] = getMsmtSpaceMetrics(Kp, Xcloud, Xtruth, h)
     Kp = 8;
     msmt_cloud = zeros(length(Xcloud), 2);
     for j = 1:length(Xcloud)
@@ -2069,8 +2084,16 @@ function [likelihood] = getMsmtSpaceMetrics(Kp, Xcloud, Xtruth, h)
     best_mu = gmm_unnorm.mu(best_mode, :);
     best_cov = gmm_unnorm.Sigma(:, :, best_mode);
     best_weight = gmm_unnorm.ComponentProportion(best_mode);
+    
+    
+    best_ent_det_cov = log(gmm_unnorm.ComponentProportion(best_mode)*det(best_cov));
+    ent_det_cov = 0;
+    for k = 1:Kp
+        ent_det_cov = ent_det_cov + gmm_unnorm.ComponentProportion(k)*det(gmm_unnorm.Sigma(:, :, k));
+    end
+    ent_det_cov = log(ent_det_cov);
 
-    likelihood = best_weight*log(mvnpdf(Xmsmt', best_mu, best_cov));
+    likelihood = log(mvnpdf(Xmsmt', best_mu, best_cov));
 end
 
 
