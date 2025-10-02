@@ -1,10 +1,10 @@
 % Start the clock
 clear all;
 tic
-for mc_idx = 4:4
+for mc_idx = 4:15
     clearvars -except mc_idx; close all;
     rng(mc_idx, "twister")
-    save_loc = "D:/PythonProjects/EDP/PGM/ParticleFusionTest/10_3_25_meeting/MultiMsmtScheme/scrap3/MC_" + num2str(mc_idx);
+    save_loc = "D:/PythonProjects/EDP/PGM/ParticleFusionTest/10_3_25_meeting/DilshadMetrics/Test2/MC_" + num2str(mc_idx);
     load_loc = "D:/PythonProjects/EDP/PGM/TestOrbits/2Obs/NRHO/TestOrbit2/Agent";
     
     cluster_by = "FullState";
@@ -35,7 +35,7 @@ for mc_idx = 4:4
     
     fusion_idx = 1;
     fuse_orig_clouds = [true]; % First entry reserved for IOD fusion
-    time_of_fusion = [50]; % hrs
+    time_of_fusion = [65]; % hrs
     cloud_names = ["Original"];
     fusion_types = ["Original", "Simple", "Weight Update"];
     
@@ -139,7 +139,7 @@ for mc_idx = 4:4
                 metric_cloud = Topo2ECI(X0cloud, t_prev, obs_lat{ob}, obs_lon{ob});
                 metric_truth = Topo2ECI(combined_state_data(ts, 2:end, ob), t_prev, obs_lat{ob}, obs_lon{ob});
                 [likelihood_metric_state_space{ob, 1}(ts), best_ent2_det_cov{ob, 1}(ts), ent2_det_cov{ob, 1}(ts), NEES{ob, 1}(ts), RMSE{ob, 1}(ts, :), std_dev{ob, 1}(ts, :), MC_std_dev{ob, 1}(ts), mat_weight_metric{ob, 1}(ts, :), MC_consistency{ob, 1}(ts), num_cluster{ob, 1}(ts), num_particles{ob, 1}(ts)] = getStateSpaceMetrics(K{ob, 1}, metric_cloud, metric_truth, cluster_by);
-                [likelihood_metric_msmt_space{ob, 1}(ts), best_ent2_det_cov_msmt{ob, cloud}(ts), ent2_det_cov_msmt{ob, cloud}(ts)] = getMsmtSpaceMetrics(K{ob, 1}, X0cloud, combined_state_data(ts, 2:end, ob), h);
+                [likelihood_metric_msmt_space{ob, 1}(ts), best_ent2_det_cov_msmt{ob, 1}(ts), ent2_det_cov_msmt{ob, 1}(ts)] = getMsmtSpaceMetrics(K{ob, 1}, X0cloud, combined_state_data(ts, 2:end, ob), h);
 
                 Xp_cloudp{ob, 1} = X0cloud;
             end
@@ -330,7 +330,7 @@ for mc_idx = 4:4
                         metric_cloud = Topo2ECI(Xp_cloudp{ob, cloud}, t_prior, obs_lat{ob}, obs_lon{ob});
                         metric_truth = Topo2ECI(Xprop_truth{ob}, t_prior, obs_lat{ob}, obs_lon{ob});
                         [likelihood_metric_state_space{ob, cloud}(ts+1), best_ent2_det_cov{ob, cloud}(ts+1), ent2_det_cov{ob, cloud}(ts+1), NEES{ob, cloud}(ts+1), RMSE{ob, cloud}(ts+1, :), std_dev{ob, cloud}(ts+1, :), MC_std_dev{ob, cloud}(ts+1), mat_weight_metric{ob, cloud}(ts+1, :), MC_consistency{ob, cloud}(ts+1), num_cluster{ob, cloud}(ts+1), num_particles{ob, cloud}(ts+1)] = getStateSpaceMetrics(Kmax, metric_cloud, metric_truth, cluster_by);
-                        [likelihood_metric_msmt_space{ob, cloud}(ts+1), best_ent2_det_cov_msmt{ob, 1}(ts+1), ent2_det_cov_msmt{ob, 1}(ts+1)] = getMsmtSpaceMetrics(K{ob, cloud}, Xp_cloudp{ob, cloud}, Xprop_truth{ob}, h);
+                        [likelihood_metric_msmt_space{ob, cloud}(ts+1), best_ent2_det_cov_msmt{ob, cloud}(ts+1), ent2_det_cov_msmt{ob, cloud}(ts+1)] = getMsmtSpaceMetrics(K{ob, cloud}, Xp_cloudp{ob, cloud}, Xprop_truth{ob}, h);
                     end
                 end
             end
@@ -892,6 +892,7 @@ for mc_idx = 4:4
     save(save_loc + '/Likelihood_msmt.mat', 'likelihood_metric_msmt_space')
     save(save_loc + '/Num_cluster.mat', 'num_cluster')
     save(save_loc + '/std_dev_per_state.mat', 'std_dev')
+    save(save_loc + '/cloud_names.mat', 'cloud_names')
     % Finish timer
     toc
 end
