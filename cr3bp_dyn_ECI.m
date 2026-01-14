@@ -1,5 +1,5 @@
 clear all; close all;
-save_loc = "D:/PythonProjects/EDP/PGM/TestOrbits/MultiObserver/L2Approach/SimData/Unrestricted/CollegeStation/Test1";
+save_loc = "D:/PythonProjects/EDP/PGM/ParticleFusionTest/12_15_25_meeting/Matlab2Python/Test9/OrbitData/Agent3a";
 %save_loc = "D:/PythonProjects/EDP/PGM_Git/PAR-PGM";
 dynamics = "CR3BP"; % 2Body or CR3BP
 % Observer locations
@@ -87,8 +87,8 @@ end
 
 % Longer-term scheduling
 tstamp = t(end); % Begin new trajectory where we left off
-end_t = (500)/normalization_quantities.time2hr;
-tspan = tstamp:(2/normalization_quantities.time2hr):end_t; % Schedule to take measurements once every 8 hours
+end_t = (250)/normalization_quantities.time2hr;
+tspan = tstamp:(8/normalization_quantities.time2hr):end_t; % Schedule to take measurements once every 8 hours
 x0_tmp = dx_dt(end,:); t(end) = []; dx_dt(end,:) = []; 
 
 dx_dts = zeros(length(tspan), length(x0)); dx_dts(1,:) = x0_tmp; % Start at end of pass
@@ -100,9 +100,9 @@ end
 
 t = [t; ts];
 dx_dt = [dx_dt; dx_dts];
-for i = 1:length(dx_dt)
-    JC(i) = Dynamics.jacobi_constant(dx_dt(i, :));
-end
+%for i = 1:length(dx_dt)
+%    JC(i) = Dynamics.jacobi_constant(dx_dt(i, :));
+%end
 %{
 rb = dx_dt(:,1:3); % Position evolutions from barycenter
 vb = dx_dt(:,4:6); % Velocity evolutions from barycenter
@@ -276,7 +276,7 @@ for i = 1:length(obj_topo_pos(:,1))
     EL(i,1) = pi/2 - acos(obj_topo_pos(i,3)/Rho(i,1));
 end
     %if (norm(cross(rot_topo(i,:), rom_topo(i,:)))/norm(rot_topo(i,:)) > Rm && ...
-time_mask = (t*normalization_quantities.time2hr >= 0 & t*normalization_quantities.time2hr <= 40) | (t*normalization_quantities.time2hr > 400);
+time_mask = (t*normalization_quantities.time2hr >= 0 & t*normalization_quantities.time2hr <= 80) | (t*normalization_quantities.time2hr > 200);
 full_ts = [t(time_mask), Rho(time_mask), AZ(time_mask), EL(time_mask)]; % Full augmented time-series vector
 elev_mask = EL >= -100000;
 mask = time_mask & elev_mask;
