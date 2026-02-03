@@ -4,7 +4,15 @@ Created on Sat Dec 13 16:52:54 2025
 
 @author: tarun
 """
+import os
+
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 import json
+from dataclasses import dataclass, replace
 import numpy as np
 from numpy import linalg as la
 from numpy import random as rand
@@ -13,20 +21,19 @@ from scipy import io as sio
 from sklearn.mixture import GaussianMixture
 from sklearn.mixture._gaussian_mixture import _estimate_log_gaussian_prob
 from numpy.polynomial.polynomial import Polynomial as poly
-import time as time
+import time as timer
 from multiprocessing import Process, Queue, Pool, cpu_count
 import datetime as dt
 import pymap3d
 import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
-import ot
 
 import CoordFunctions as cf
 import PlottingFunctions as plot
+import ObserverClass as oc
 
 import Dynamics as dyn
 from pathlib import Path
-
 
 # Check certain file for existence
 def ensureDirExists(folder_path):
@@ -104,7 +111,7 @@ def matchTimesteps(reference_ts, query_ts, tol):
     return matched_indices
 
 
-def stateEstCloud(num_msmt_for_IOD, ts, nfit, theta_f, range_f, combined_msmt_data, low_lim, up_lim, normalization_quantities, rng):
+def stateEstCloud(num_msmt_for_IOD, ts, nfit, theta_f, range_f, combined_msmt_data, low_lim, up_lim, norm_quantities, rng):
     msmt_existance_mask = combined_msmt_data[:, 1] == True
     #times_of_msmts = combined_msmt_data[ts - num_msmt_for_IOD:ts+1, 0]
     mu_t = combined_msmt_data[msmt_existance_mask, 2:5].reshape(-1, 1).flatten()
@@ -119,7 +126,7 @@ def stateEstCloud(num_msmt_for_IOD, ts, nfit, theta_f, range_f, combined_msmt_da
     
     noised_obs = np.hstack((combined_msmt_data[msmt_existance_mask, 0].reshape(-1, 1), data_vec.reshape(-1, 3)))
     for i in range(noised_obs.shape[0]):
-        noised_obs[i,1] = rng.uniform(low_lim, up_lim)/normalization_quantities['dist2km']
+        noised_obs[i,1] = rng.uniform(low_lim, up_lim)/norm_quantities['dist2km']
     
     hdo = noised_obs[:, :]
 
@@ -305,9 +312,9 @@ def propPoint(particle_prior_synodic, t_int, interval, dynamics_model=dyn.cr3bp_
     
     return particle_post_synodic
 
-def propagate(cloud_prior_topo, t_int, interval, obs_lat, obs_lon, obs_el, normalization_quantities):
+def propagate(cloud_prior_topo, t_int, interval, obs_lat, obs_lon, obs_el, norm_quantities):
     
-    cloud_prior_synodic = cf.Topo2Synodic(np.copy(cloud_prior_topo), t_int, obs_lat, obs_lon, obs_el, normalization_quantities)
+    cloud_prior_synodic = cf.Topo2Synodic(np.copy(cloud_prior_topo), t_int, obs_lat, obs_lon, obs_el, norm_quantities)
     
     termSat.terminal = True
     termSat.direction = 0
@@ -320,13 +327,13 @@ def propagate(cloud_prior_topo, t_int, interval, obs_lat, obs_lon, obs_el, norma
         prop_Points = p.starmap(propPoint, pool_propInputs)
     '''
     cloud_post_synodic = np.zeros(cloud_prior_synodic.shape)
-    starttime = time.time()
+    starttime = timer.time()
     for particle in range(cloud_prior_synodic.shape[0]):
         cloud_post_synodic[particle, :] = propPoint(np.copy(cloud_prior_synodic[particle, :]), t_int, interval)
-    endtime = time.time()
+    endtime = timer.time()
     #print(endtime - starttime)
     #cloud_post_synodic = np.asarray(prop_Points)
-    cloud_post_topo = cf.Synodic2Topo(np.copy(cloud_post_synodic), t_int+interval, obs_lat, obs_lon, obs_el, normalization_quantities)
+    cloud_post_topo = cf.Synodic2Topo(np.copy(cloud_post_synodic), t_int+interval, obs_lat, obs_lon, obs_el, norm_quantities)
     
     return cloud_post_topo
 
@@ -393,9 +400,9 @@ def unstandardize(gmm_normalized, original_mu, original_std):
     return gmm_unnormalized
 
 
-def fitGMM(X, rng, K_upper = 29):
-    if K_upper >= 16:
-        K_int = 4
+def fitGMM(X, rng, K_upper = 77):
+    if K_upper >= 13:
+        K_int = 8
     else:
         K_int = 2
     k_range = range(4, K_upper, K_int)
@@ -420,7 +427,7 @@ def fitGMM(X, rng, K_upper = 29):
     return best_gmm
 
 
-def getCloudMetrics(X_cloud, X_truth, t_int, cloud_is_active, K_initial, obs_lat, obs_lon, obs_el, normalization_quantities, rng, ts, save_loc2, h=None):
+def getCloudMetrics(obs_list, t_int, cloud_is_active, norm_quantities, rng, ts, save_loc2, h=None):
     def js_divergence(gmP, gmQ, XP, XQ):
         def log_m(log_p, log_q): 
             return sci.special.logsumexp([log_p, log_q], axis=0) - np.log(2)
@@ -467,6 +474,7 @@ def getCloudMetrics(X_cloud, X_truth, t_int, cloud_is_active, K_initial, obs_lat
     # TODO: Rename total_num_clouds to max_num_clouds everywhere
     gmm_unnormalized = [None]*cloud_is_active.shape[0]
     
+    num_particles = np.full(cloud_is_active.shape, np.nan)
     AIC = np.full(cloud_is_active.shape, np.nan)
     K = np.full(cloud_is_active.shape, np.nan)
     gmm_truth_loglikelihood = np.full(cloud_is_active.shape, np.nan)
@@ -477,14 +485,14 @@ def getCloudMetrics(X_cloud, X_truth, t_int, cloud_is_active, K_initial, obs_lat
 
     for ob in np.where(cloud_is_active[:, 0])[0]:
         if h is None:
-            metric_truth = cf.Topo2Synodic(np.copy(X_truth[ob]), t_int, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
+            metric_truth = cf.Topo2Synodic(np.copy(obs_list[ob][0].topo_truth), t_int, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
         else:
-            metric_truth = h(np.copy(X_truth[ob]))
+            metric_truth = h(np.copy(obs_list[ob][0].topo_truth))
         for cloud in np.where(cloud_is_active[ob])[0]:
             if h is None:
-                metric_cloud = cf.Topo2Synodic(np.copy(X_cloud[ob, cloud]), t_int, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
+                metric_cloud = cf.Topo2Synodic(np.copy(obs_list[ob][cloud].topo_cloud_post), t_int, obs_list[ob][cloud].lat, obs_list[ob][cloud].lon, obs_list[ob][cloud].el, norm_quantities)
             else:
-                metric_cloud = h(np.copy(X_cloud[ob, cloud]))
+                metric_cloud = h(np.copy(obs_list[ob][cloud].topo_cloud_post))
             # Create unnormalized gmm for analysis
             X_norm, mu, std = standardize(metric_cloud)
             gmm_normalized, AIC[ob, cloud], K[ob, cloud] = fitGMM(np.copy(X_norm), rng)
@@ -518,6 +526,7 @@ def getCloudMetrics(X_cloud, X_truth, t_int, cloud_is_active, K_initial, obs_lat
             # Standard Deviation
             # RMSE
             #best_RMSE = np.sqrt(np.mean((best_samples - X_truth)**2, axis=0))
+            num_particles[ob, cloud] = metric_cloud.shape[0]
     #K = K.astype(int)
     if h is None:
         valid_rows = np.where(cloud_is_active[:, 0])[0]
@@ -531,9 +540,9 @@ def getCloudMetrics(X_cloud, X_truth, t_int, cloud_is_active, K_initial, obs_lat
         # TODO: Check next line
         #for idx, ob_1 in enumerate(valid_rows[0]):
         for ob_1 in range(1):
-            X_cloud_1 = cf.Topo2Synodic(np.copy(X_cloud[ob_1, 0]), t_int, obs_lat[ob_1], obs_lon[ob_1], obs_el[ob_1], normalization_quantities)
+            X_cloud_1 = cf.Topo2Synodic(np.copy(obs_list[ob_1][0].topo_cloud_post), t_int, obs_list[ob_1][0].lat, obs_list[ob_1][0].lon, obs_list[ob_1][0].el, norm_quantities)
             for ob_2 in valid_rows[0 + 1:]:
-                X_cloud_2 = cf.Topo2Synodic(np.copy(X_cloud[ob_2, 0]), t_int, obs_lat[ob_2], obs_lon[ob_2], obs_el[ob_2], normalization_quantities)
+                X_cloud_2 = cf.Topo2Synodic(np.copy(obs_list[ob_2][0].topo_cloud_post), t_int, obs_list[ob_2][0].lat, obs_list[ob_2][0].lon, obs_list[ob_2][0].el, norm_quantities)
                 # Compute Ob-Ob metrics for only the original clouds of each observer
                 K_1 = int(K[ob_1, 0])
                 K_2 = int(K[ob_2, 0])
@@ -558,8 +567,8 @@ def getCloudMetrics(X_cloud, X_truth, t_int, cloud_is_active, K_initial, obs_lat
                 KL[ob_1, ob_2, 1] = -gmm_unnormalized[ob_1].score(X_cloud_2) + gmm_unnormalized[ob_2].score(X_cloud_2)
                 KL[ob_1, ob_2, 2] = 0.5*(KL[ob_1, ob_2, 0] + KL[ob_1, ob_2, 1])
                 JS[ob_1, ob_2] = js_divergence(gmm_unnormalized[ob_1], gmm_unnormalized[ob_2], X_cloud_1, X_cloud_2)
-                for d in range(6):
-                    JS_marginal[ob_1, ob_2, d] = sci.spatial.distance.jensenshannon(X_cloud_1[:, d], X_cloud_2[:, d])
+                #for d in range(6):
+                    #JS_marginal[ob_1, ob_2, d] = sci.spatial.distance.jensenshannon(X_cloud_1[:, d], X_cloud_2[:, d])
     else:
         avg_ob_ob_likeli = None
         avg_ob_ob_weight_loglikeli = None
@@ -569,7 +578,7 @@ def getCloudMetrics(X_cloud, X_truth, t_int, cloud_is_active, K_initial, obs_lat
         JS_marginal = None
         ill_conditioned = None
     
-    return gmm_truth_loglikelihood, gmm_entropy, gmm_RMSE, best_truth_loglikelihood, best_entropy, K, X_cloud.shape[0], AIC, avg_ob_ob_likeli, avg_ob_ob_weight_loglikeli, avg_cross_entropy, KL, JS, JS_marginal, ill_conditioned
+    return gmm_truth_loglikelihood, gmm_entropy, gmm_RMSE, best_truth_loglikelihood, best_entropy, K, num_particles, AIC, avg_ob_ob_likeli, avg_ob_ob_weight_loglikeli, avg_cross_entropy, KL, JS, JS_marginal, ill_conditioned
 
 
 def fusionMethods(cloud_1, cloud_2, fusion_type, K, rng):
@@ -596,15 +605,16 @@ def weightUpdateAlgorithm(cloud_1, cloud_2, K, rng):
         post_cov = (post_cov + post_cov.T) / 2
         return post_mu, post_cov
     
-    num_particles = cloud_1.shape[0]
-    _, means_1, covs_1, prior_weights_1, K_1 = cluster(cloud_1, K, rng, None, None)
-    _, means_2, covs_2, prior_weights_2, K_2 = cluster(cloud_2, K, rng, None, None)
-    print(f"K_1, K_2 = {K_1}, {K_2}")
+    num_particles = max(cloud_1.shape[0], cloud_2.shape[0])
+    #_, means_1, covs_1, prior_weights_1, K_1 = cluster(cloud_1, K, rng, None, None)
+    #_, means_2, covs_2, prior_weights_2, K_2 = cluster(cloud_2, K, rng, None, None)
+    #print(f"K_1, K_2 = {K_1}, {K_2}")
     
     num_tries = 0
-    while False:
+    while num_tries <= 30:
         try:
             num_tries += 1
+            '''
             X_norm, mu, std = standardize(cloud_1)
             gmm_normalized, _, K_1 = fitGMM(np.copy(X_norm), rng, K_upper = K)
             gmm_unnormalized_temp_1 = unstandardize(gmm_normalized, mu, std)
@@ -615,10 +625,12 @@ def weightUpdateAlgorithm(cloud_1, cloud_2, K, rng):
             
             means_1 = gmm_unnormalized_temp_1.means_; covs_1 = gmm_unnormalized_temp_1.covariances_; prior_weights_1 = gmm_unnormalized_temp_1.weights_;
             means_2 = gmm_unnormalized_temp_2.means_; covs_2 = gmm_unnormalized_temp_2.covariances_; prior_weights_2 = gmm_unnormalized_temp_2.weights_;
-            
+            '''
+            _, means_1, covs_1, prior_weights_1, K_1 = cluster(cloud_1, K, rng, None, None)
+            _, means_2, covs_2, prior_weights_2, K_2 = cluster(cloud_2, K, rng, None, None)
             post_weights = np.full((K_1, K_2), np.nan)
             likelihoods = np.full((K_1, K_2), np.nan)
-
+            #print(f"K_1, K_2 = {K_1}, {K_2}")
             for k1 in range(K_1):
                 for k2 in range(K_2):
                     likelihoods[k1, k2] = sci.stats.multivariate_normal.pdf(means_2[k2], mean=means_1[k1], cov=covs_2[k2] + covs_1[k1])
@@ -626,7 +638,7 @@ def weightUpdateAlgorithm(cloud_1, cloud_2, K, rng):
         except Exception as error:
             #print("Error: ", error)
             pass
-    print(num_tries)
+    #print(num_tries)
     
     post_weights = np.full((K_1, K_2), np.nan)
     likelihoods = np.full((K_1, K_2), np.nan)
@@ -649,23 +661,36 @@ def weightUpdateAlgorithm(cloud_1, cloud_2, K, rng):
     return fused_cloud
 
 
+def enforceCislunarBounds(X_cloud, time, lat, lon, el, norm_quantities, low_lim, up_lim, vel_lim):
+    observer_pos = cf.getObserverPos(time, lat, lon, el, norm_quantities)
+    
+    #for i in range(len(X_cloud[:,0])):
+    #    if(np.linalg.norm(X_cloud[i,:3] + obs_pos) > low_lim and np.linalg.norm(X_cloud[i,:3] + obs_pos) <= up_lim):
+    #            j = j + 1
+    #            Xm_cloud_tmp[j-1,:] = np.copy(X_cloud[i,:])
+    obj_dist = np.linalg.norm(X_cloud[:, :3] + observer_pos, axis=1)*norm_quantities["dist2km"]
+    obj_vel = np.linalg.norm(X_cloud[:, 3:], axis=1)*norm_quantities["vel2kms"]
+    pruned_cloud = X_cloud[(low_lim < obj_dist) & (obj_dist < up_lim) & (obj_vel <= vel_lim), :]
+    return pruned_cloud
+
+
 def main(MC_idx):
     success = False
     rng = np.random.default_rng(MC_idx)
-    W = 6 # Parallelization factor
-    save_loc = Path("D:/PythonProjects/EDP/PGM/ParticleFusionTest/12_15_25_meeting/Matlab2Python/Test12/pyMC2_" + str(MC_idx))
-    load_loc = Path("D:/PythonProjects/EDP/PGM/ParticleFusionTest/12_15_25_meeting/Matlab2Python/Test12/OrbitData/Agent")
-    load_loc2 = Path("D:/PythonProjects/EDP/PGM/ParticleFusionTest/12_15_25_meeting/Matlab2Python/Test12")
+    base_or_exp = "Exp"
+    save_loc = Path(f"D:/PythonProjects/EDP/PGM/ParticleFusionTest/12_15_25_meeting/Matlab2Python/Test21/pyMC_{base_or_exp}_{MC_idx}")
+    load_loc = Path(f"D:/PythonProjects/EDP/PGM/ParticleFusionTest/12_15_25_meeting/Matlab2Python/Test21/OrbitData{base_or_exp}/Agent")
+    #load_loc2 = Path("D:/PythonProjects/EDP/PGM/ParticleFusionTest/12_15_25_meeting/Matlab2Python/Test13")
     dynamics = "CR3BP";
     if (dynamics == "CR3BP"):
         dist2km = 384400 # Kilometers per non-dimensionalized distance
         time2hr = 4.342*24 # Hours per non-dimensionalized time
         vel2kms = dist2km/(time2hr*60*60) # Kms per non-dimensionalized velocity
-        normalization_quantities = {"dist2km": dist2km,
+        norm_quantities = {"dist2km": dist2km,
                                     "vel2kms": vel2kms,
                                     "time2hr": time2hr,
                                     "mu": 1.2150582e-2}
-        #dynamics_model = @(t, x) Dynamics.cr3bp_dyn(t, x, normalization_quantities.mu);
+        #dynamics_model = @(t, x) Dynamics.cr3bp_dyn(t, x, norm_quantities.mu);
     
     cluster_by = "FullState"
     Kn = 14 # Number of clusters (original)
@@ -673,19 +698,18 @@ def main(MC_idx):
     Kmax = 14 # Maximum number of clusters (Kmax = 1 for EnKF)
 
     plot_IOD = False
-    plot_indv_clouds = [True, False] # Not recommended unless debugging
-    plot_cross_observers = False # Recommended to see observers' original clouds plotted on same figure
-    save_MC_metrics = True # Recommended
+    plot_indv_clouds = [False, False] # Not recommended unless debugging
+    plot_cross_observers = True # Recommended to see observers' original clouds plotted on same figure
     
-    num_IOD_particles = 15000
+    #num_IOD_particles = 1000
     total_num_agents = 2 # Expected number of agents
     num_active_obs = 0
-    Lp = np.array([[15000], [15000]], dtype=int)
+    Lp = np.array([[10000], [10000]], dtype=int)
     num_msmt_for_IOD = np.array([[10], [10]], dtype=int)
     ts_to_perform_IOD = np.array([[0], [20]], dtype=int)
-    plot_combined_clouds = np.array([[True], [False], [False], [False]], dtype=bool) # Plot all clouds of single observer on same figure. Recommended for observer 1
+    plot_combined_clouds = np.array([[True], [False]], dtype=bool) # Plot all clouds of single observer on same figure. Recommended for observer 1
     num_clouds_per_agent = np.ones(total_num_agents, dtype=int)
-
+    
     #partial_tsa = [sio.loadmat(f"{load_loc}{i+1}a/partial_ts.mat")["partial_ts"] for i in range(total_num_agents)]
     #full_tsa = [sio.loadmat(f"{load_loc}{i+1}a/full_ts.mat")["full_ts"] for i in range(total_num_agents)]
     #full_vtsa = [sio.loadmat(f"{load_loc}{i+1}a/full_vts.mat")["full_vts"] for i in range(total_num_agents)]
@@ -699,26 +723,26 @@ def main(MC_idx):
     
     
     # fusion_information contains various info formatted as fusion #: [observer index, observer index, fuse?, timestep to fuse]
-    fusion_information = [[0, 1, True, 45, "Weight Update Algorithm", 17],
-                          [0, 1, True, 45, "Weight Update Algorithm", 25],
-                          [0, 1, True, 45, "Weight Update Algorithm", 33],
-                          [0, 1, True, 45, "Weight Update Algorithm", 41]]#[[0, 1, False, 45], [0, 1, False, 55], [0, 1, False, 65], [0, 1, False, 75]] 
-    cloud_names = [[f"Original Obs: {ob}. IOD: {all_timesteps[ts_to_perform_IOD[ob]][0]*normalization_quantities['time2hr']:.0f} hrs"] for ob in range(total_num_agents-1)]
-    cloud_names.append(["Baseline Obs"])
-    linestyle = [["-"] for ob in range(total_num_agents)]
+    fusion_information = [[0, 1, False, 30, "Weight Update Algorithm", 14],
+                          [0, 1, False, 35, "Weight Update Algorithm", 14],
+                          [0, 1, False, 40, "Weight Update Algorithm", 14],
+                          [0, 1, False, 45, "Weight Update Algorithm", 14]]#[[0, 1, False, 45], [0, 1, False, 55], [0, 1, False, 65], [0, 1, False, 75]] 
+    #cloud_names = [[f"Original Obs: {ob}. IOD: {all_timesteps[ts_to_perform_IOD[ob]][0]*norm_quantities['time2hr']:.0f} hrs"] for ob in range(total_num_agents-1)]
+    #cloud_names.append(["Baseline Obs"])
+    #linestyle = [["-"] for ob in range(total_num_agents)]
     fusion_types = ["Original", "Weight Update"]
     num_new_clouds_per_agent = 1
 
     # College Station
-    obs_lat = np.tile(30.618963, (6))
-    obs_lon = np.tile(-96.339214, (6))
-    obs_el = np.tile(103.8, (6))
+    obs_lat = [30.618963, 30.618963, 30.618963]
+    obs_lon = [-96.339214, -96.339214, -96.339214]
+    obs_el = [103.8, 103.8, 103.8]
     for ob in range(total_num_agents):
         ensureDirExists(save_loc / f"Observer{ob}" / "Topo" / "Combined")
         ensureDirExists(save_loc / f"Observer{ob}" / "Synodic" / "Combined")
-        ensureDirExists(save_loc / f"Observer{ob}" / "ECI" / "Combined")
+        #ensureDirExists(save_loc / f"Observer{ob}" / "ECI" / "Combined")
     ensureDirExists(save_loc / "CrossOb" / "Synodic")
-    ensureDirExists(save_loc / "CrossOb" / "ECI")
+    #ensureDirExists(save_loc / "CrossOb" / "ECI")
     
     h = lambda x: np.array([np.arctan2(x[:, 1],x[:, 0]),
                             np.pi/2 - np.arccos(x[:, 2]/la.norm(x[:, :3], axis=1))]).T
@@ -727,11 +751,33 @@ def main(MC_idx):
     range_f = np.tile(0.25, (6))
     R_weight = np.array([[theta_f*np.pi/648000, 0], [0, theta_f*np.pi/648000]])**2
     
-    enforce_bounds = False
-    if dynamics == "CR3BP":
-        low_lim = 2*42164 # Two times the GEO Distance
-        up_lim = 550000
-        vel_lim = 42 # Escape velocity of the solar system
+    if base_or_exp == "Exp":
+        obs_list = [[oc.Observer(name = f"Original Obs: {ob}. IOD: {all_timesteps[ts_to_perform_IOD[ob]][0]*norm_quantities['time2hr']:.0f} hrs",
+                                 is_orig_obs = True,
+                                 linestyle = "-",
+                                 lat = obs_lat[ob],
+                                 lon = obs_lon[ob],
+                                 el = obs_el[ob],
+                                 max_particles = Lp[ob, 0],
+                                 K = Kmax,
+                                 plot_indv_clouds = plot_indv_clouds[ob],
+                                 plot_combined_clouds = plot_combined_clouds[ob, 0])] for ob in range(total_num_agents)]
+    if base_or_exp == "Base":
+        obs_list = [[oc.Observer(name = "Baseline",
+                                 is_orig_obs = True,
+                                 linestyle = "-",
+                                 lat = 30.618963,
+                                 lon = -96.339214,
+                                 el = 103.8,
+                                 max_particles = Lp[-1],
+                                 K = Kmax,
+                                 plot_indv_clouds = plot_indv_clouds[-1],
+                                 plot_combined_clouds = plot_combined_clouds[-1])]]
+    
+    enforce_bounds = True
+    low_lim = 2*42164 # Two times the GEO Distance
+    up_lim = 550000
+    vel_lim = 42 # Escape velocity of the solar system
     
     
     total_num_clouds = 1 + num_new_clouds_per_agent * sum(row[2] for row in fusion_information)
@@ -765,30 +811,21 @@ def main(MC_idx):
                "ill_conditioned": (total_num_agents, total_num_agents, num_timesteps)}
     
     metrics = {key: np.full(shape, np.nan) for key, shape in metrics.items()}
-    
-    # TODO: Prob not necessary
-    fig_num = 1
-    
-    #X_truth = np.empty((total_num_agents), dtype=object)
-    X_truth = np.full((total_num_agents, 1, 6), np.nan)
-    #Xm_cloud = np.empty((total_num_agents, total_num_clouds), dtype=object)
-    Xm_cloud = np.full((total_num_agents, total_num_clouds, Lp[ob, 0], 6), np.nan)
-    #Xp_cloud = np.empty((total_num_agents, total_num_clouds), dtype=object)
-    #Xp_cloudp = np.empty((total_num_agents, total_num_clouds), dtype=object)
-    Xp_cloudp = np.full((total_num_agents, total_num_clouds, Lp[ob, 0], 6), np.nan)
+
     cloud_is_active = np.full((total_num_agents, total_num_clouds), False)
     # TODO: Check if should be -1
     for ts in range(num_timesteps-1):
         t_prev = all_timesteps[ts]
         #%% IOD
-        for ob, is_active in enumerate(~(cloud_is_active[:, 0])):
+        for ob, is_inactive in enumerate(~(cloud_is_active[:, 0])):
             num_msmts_check = sum(combined_msmt_data[ts_to_perform_IOD[ob, 0]:ts+1, 1, ob]) >= num_msmt_for_IOD[ob, 0]
-            if is_active and num_msmts_check:
-                print(f"Performing IOD on object: {ob}")
+            if is_inactive and num_msmts_check:
+                #print(f"Performing IOD on object: {ob}")
                 order_of_fit = 4
+                num_IOD_particles = Lp[ob, 0]
                 X0_cloud_temp = np.zeros((num_IOD_particles, 6));
                 
-                starttime = time.time()
+                starttime = timer.time()
                 for particle in range(num_IOD_particles):
                     X0_cloud_temp[particle, :] = stateEstCloud(num_msmt_for_IOD[ob, 0], 
                                                   ts, 
@@ -798,87 +835,95 @@ def main(MC_idx):
                                                   combined_msmt_data[ts_to_perform_IOD[ob, 0]:ts+1, :, ob], 
                                                   low_lim, 
                                                   up_lim,
-                                                  normalization_quantities,
+                                                  norm_quantities,
                                                   rng)
-                endtime = time.time()
-                print(endtime - starttime)
+                endtime = timer.time()
+                #print(endtime - starttime)
                 #X0_cloud_temp = sci.io.loadmat(load_loc2/"X0cloud_temp.mat")
                 #X0_cloud_temp = X0_cloud_temp['X0cloud_temp']
-                if enforce_bounds:
-                    '''
+                if False:
+                    
                     X0_cloud = enforceCislunarBounds(X0_cloud_temp,
                                                     t_prev,
-                                                    obs_lat[ob],
-                                                    obs_lon[ob],
-                                                    normalization_quantities,
+                                                    obs_list[ob][0].lat,
+                                                    obs_list[ob][0].lon,
+                                                    obs_list[ob][0].el,
+                                                    norm_quantities,
                                                     low_lim,
                                                     up_lim,
                                                     vel_lim)
-                    '''
+                    
                 else:
                     X0_cloud = X0_cloud_temp
                 # TODO: Remove most legends
                 # TODO: fix plots
                 X0_truth = combined_state_data[ts, 1:, ob].reshape(1, -1);
                 
-                plot.plotStateSpace(X0_cloud,
-                                    X0_truth, 
-                                    1,
-                                    np.ones(X0_cloud.shape[0], dtype=int), 
-                                    normalization_quantities, 
-                                    f"Timestep: {t_prev*normalization_quantities['time2hr']:3.2f} Hours Obs: {ob}",
-                                    save_loc/f"Observer{ob}"/"Topo"/"iodCloud.png")
-                if dynamics == "CR3BP":
-                    plotting_cloud = cf.Topo2Synodic(np.copy(X0_cloud), t_prev, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
-                    plotting_truth = cf.Topo2Synodic(np.copy(X0_truth), t_prev, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
+                if plot_IOD:
+                    plot.plotStateSpace(X0_cloud,
+                                        X0_truth, 
+                                        1,
+                                        np.ones(X0_cloud.shape[0], dtype=int), 
+                                        norm_quantities, 
+                                        f"Timestep: {t_prev*norm_quantities['time2hr']:3.2f} Hours Obs: {ob}",
+                                        save_loc/f"Observer{ob}"/"Topo"/"iodCloud.png")
+                    plotting_cloud = cf.Topo2Synodic(np.copy(X0_cloud), t_prev, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
+                    plotting_truth = cf.Topo2Synodic(np.copy(X0_truth), t_prev, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
                     plot.plotStateSpace(plotting_cloud,
                                         plotting_truth, 
                                         1,
                                         np.ones(X0_cloud.shape[0], dtype=int), 
-                                        normalization_quantities, 
-                                        f"Timestep: {t_prev*normalization_quantities['time2hr']:3.2f} Hours Obs: {ob}",
+                                        norm_quantities, 
+                                        f"Timestep: {t_prev*norm_quantities['time2hr']:3.2f} Hours Obs: {ob}",
                                         save_loc/f"Observer{ob}"/"Synodic"/"iodCloud.png")
                 
                 cloud_is_active[ob, 0] = True
-                #active_mask.sort()
                 num_active_obs = np.sum(cloud_is_active[:, 0])
-                # TODO: Check h against matlab h
-                Xp_cloudp[ob, 0] = X0_cloud.copy()
-                X_truth[ob] = X0_truth.copy()
-                print(X0_truth[0, :3]*normalization_quantities['dist2km'])
-                print(X_truth[0, 0, :3]*normalization_quantities['dist2km'])
+                obs_list[ob][0].topo_cloud_post = X0_cloud.copy()
+                obs_list[ob][0].topo_truth = X0_truth.copy()
+                #print(X0_truth[0, :3]*norm_quantities['dist2km'])
+                #print(obs_list[ob][0].topo_truth[0, :3]*norm_quantities['dist2km'])
                 
         #%% Fusion
         if num_active_obs >= 2:
             for row, (fuse_id_1, fuse_id_2, fuse, fusion_timestep, fusion_type, K_upper) in enumerate(fusion_information):
                 if cloud_is_active[fuse_id_1, 0] and cloud_is_active[fuse_id_2, 0] and fuse and fusion_timestep == ts:
-                    cloud_to_fuse_1 = cf.Topo2Synodic(np.copy(Xp_cloudp[fuse_id_1, 0]), t_prev, obs_lat[fuse_id_1], obs_lon[fuse_id_1], obs_el[fuse_id_1], normalization_quantities)
-                    cloud_to_fuse_2 = cf.Topo2Synodic(np.copy(Xp_cloudp[fuse_id_2, 0]), t_prev, obs_lat[fuse_id_2], obs_lon[fuse_id_2], obs_el[fuse_id_2], normalization_quantities)
+                    cloud_to_fuse_1 = cf.Topo2Synodic(np.copy(obs_list[fuse_id_1][0].topo_cloud_post), t_prev, obs_list[fuse_id_1][0].lat, obs_list[fuse_id_1][0].lon, obs_list[fuse_id_1][0].el, norm_quantities)
+                    cloud_to_fuse_2 = cf.Topo2Synodic(np.copy(obs_list[fuse_id_2][0].topo_cloud_post), t_prev, obs_list[fuse_id_2][0].lat, obs_list[fuse_id_2][0].lon, obs_list[fuse_id_2][0].el, norm_quantities)
                     
                     fused_cloud_1, _ = fusionMethods(cloud_to_fuse_1, cloud_to_fuse_2, fusion_type, K_upper, rng)
                     
-                    Xp_cloudp[fuse_id_1, num_clouds_per_agent[fuse_id_1]] = cf.Synodic2Topo(fused_cloud_1, t_prev, obs_lat[fuse_id_1], obs_lon[fuse_id_1], obs_el[fuse_id_1], normalization_quantities)
-                    cloud_names[fuse_id_1].append(f"Fused Obs: {fuse_id_1} & {fuse_id_2} @ {t_prev*normalization_quantities['time2hr']:.0f} hrs")
-                    linestyle[fuse_id_1].append('--')
+                    fused_cloud_1 = cf.Synodic2Topo(np.copy(fused_cloud_1), t_prev,  obs_list[fuse_id_1][0].lat, obs_list[fuse_id_1][0].lon, obs_list[fuse_id_1][0].el, norm_quantities)
+                    obs_list[fuse_id_1].append(replace(obs_list[fuse_id_1][0],
+                                                       name = f"Fused Obs: {fuse_id_1} & {fuse_id_2} @ {t_prev*norm_quantities['time2hr']:.0f} hrs",
+                                                       is_orig_obs = False,
+                                                       linestyle = "--",
+                                                       plot_combined_clouds = False))
+                    
+                    
                     cloud_is_active[fuse_id_1, num_clouds_per_agent[fuse_id_1]] = True
+                    obs_list[fuse_id_1][-1].topo_cloud_post = np.copy(fused_cloud_1)
+                    obs_list[fuse_id_1][-1].topo_cloud_prior = None
+                    obs_list[fuse_id_1][-1].topo_truth = None
                     
                     fusion_information[row][2] = False
                     num_clouds_per_agent[fuse_id_1] += num_new_clouds_per_agent
                     
                     for ob in [fuse_id_1, fuse_id_2]:
                         if plot_combined_clouds[ob]:
-                            plotting_cloud = np.vstack(Xp_cloudp[ob, :num_clouds_per_agent[ob]])
-                            plotting_truth = np.copy(X_truth[ob])
-                            plotting_idx = np.repeat(np.arange(num_clouds_per_agent[ob])+1, Lp[ob, 0])
+                            plotting_cloud = np.vstack([obs_list[ob][cloud].topo_cloud_post for cloud in np.where(cloud_is_active[ob])[0]])
+                            plotting_truth = np.copy(obs_list[ob][0].topo_truth)
+                            plotting_idx = np.hstack([np.repeat(cloud+1, obs_list[ob][cloud].n_particles("post")) for cloud in np.where(cloud_is_active[ob])[0]]).T
+                            cloud_names_temp = [obs_list[ob][cloud].name for cloud in np.where(cloud_is_active[ob])[0]]
                             plot.plotStateSpace(plotting_cloud,
                                                 plotting_truth, 
                                                 num_clouds_per_agent[ob],
                                                 plotting_idx, 
-                                                normalization_quantities, 
-                                                f"Timestep: {t_prev*normalization_quantities['time2hr']:3.2f} Hours Fusion Obs: {fuse_id_1}, {fuse_id_2}",
+                                                norm_quantities, 
+                                                f"Timestep: {t_prev*norm_quantities['time2hr']:3.2f} Hours Fusion Obs: {fuse_id_1}, {fuse_id_2}",
                                                 save_loc/f"Observer{ob}"/"Topo"/"Combined"/f"Timestep_{ts}_0B_combined.png",
                                                 plot_cross_observers = True,
-                                                cloud_names = cloud_names[ob])
+                                                cloud_names = cloud_names_temp)
                             plot.plotMsmtSpace(plotting_cloud,
                                                 plotting_truth,
                                                 np.array([np.nan, np.nan]),
@@ -886,180 +931,156 @@ def main(MC_idx):
                                                 None,
                                                 num_clouds_per_agent[ob],
                                                 plotting_idx,
-                                                f"Az-El Timestep: {t_prev*normalization_quantities['time2hr']:3.2f} Hours Fusion Obs: {fuse_id_1}, {fuse_id_2}",
+                                                f"Az-El Timestep: {t_prev*norm_quantities['time2hr']:3.2f} Hours Fusion Obs: {fuse_id_1}, {fuse_id_2}",
                                                 save_loc/f"Observer{ob}"/"Topo"/"Combined"/f"Timestep_{ts}_0C_cloud_combined.png",
                                                 False,
                                                 plot_cross_observers=True,
-                                                cloud_names = cloud_names[ob])
+                                                cloud_names = cloud_names_temp)
                             
-                            plotting_cloud = cf.Topo2Synodic(np.copy(plotting_cloud), t_prev, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
-                            plotting_truth = cf.Topo2Synodic(np.copy(plotting_truth), t_prev, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
+                            plotting_cloud = cf.Topo2Synodic(np.copy(plotting_cloud), t_prev, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
+                            plotting_truth = cf.Topo2Synodic(np.copy(plotting_truth), t_prev, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
                             plot.plotStateSpace(plotting_cloud,
                                                 plotting_truth, 
                                                 num_clouds_per_agent[ob],
                                                 plotting_idx, 
-                                                normalization_quantities, 
-                                                f"Timestep: {t_prev*normalization_quantities['time2hr']:3.2f} Hours Fusion Obs: {fuse_id_1}, {fuse_id_2}",
+                                                norm_quantities, 
+                                                f"Timestep: {t_prev*norm_quantities['time2hr']:3.2f} Hours Fusion Obs: {fuse_id_1}, {fuse_id_2}",
                                                 save_loc/f"Observer{ob}"/"Synodic"/"Combined"/f"Timestep_{ts}_0B_combined.png",
                                                 plot_cross_observers = True,
-                                                cloud_names = cloud_names[ob])
+                                                cloud_names = cloud_names_temp)
         
                     
         #%% Calculate Metrics
         if np.any(cloud_is_active):
-            metrics["likelihood_state_weighted"][:, :, ts],  metrics["entropy_state_weighted"][:, :, ts], metrics["RMSE"][:, :, ts, :], metrics["likelihood_state_best"][:, :, ts], metrics["entropy_state_best"][:, :, ts], metrics["num_cluster"][:, :, ts], metrics["num_particles"][:, :, ts], metrics["AIC_state"][:, :, ts], metrics["avg_ob_ob_likeli"][:, :, ts], metrics["avg_ob_ob_weight_loglikeli"][:, :, ts], metrics["avg_cross_entropy"][:, :, ts], metrics["KL"][:, :, ts, :], metrics["JS"][:, :, ts], metrics["JS_marginal"][:, :, ts, :], metrics["ill_conditioned"][:, :, ts] = getCloudMetrics(np.copy(Xp_cloudp), np.copy(X_truth), t_prev, cloud_is_active, K, obs_lat, obs_lon, obs_el, normalization_quantities, rng, ts+1, load_loc2)
-            metrics["likelihood_msmt_weighted"][:, :, ts],  metrics["entropy_msmt_weighted"][:, :, ts], _, metrics["likelihood_msmt_best"][:, :, ts], metrics["entropy_msmt_best"][:, :, ts], _, _, metrics["AIC_msmt"][:, :, ts], _, _, _, _, _, _, _ = getCloudMetrics(np.copy(Xp_cloudp), np.copy(X_truth), t_prev, cloud_is_active, K, obs_lat, obs_lon, obs_el, normalization_quantities, rng, ts+1, load_loc2, h=h)
+            metrics["likelihood_state_weighted"][:, :, ts],  metrics["entropy_state_weighted"][:, :, ts], metrics["RMSE"][:, :, ts, :], metrics["likelihood_state_best"][:, :, ts], metrics["entropy_state_best"][:, :, ts], metrics["num_cluster"][:, :, ts], metrics["num_particles"][:, :, ts], metrics["AIC_state"][:, :, ts], metrics["avg_ob_ob_likeli"][:, :, ts], metrics["avg_ob_ob_weight_loglikeli"][:, :, ts], metrics["avg_cross_entropy"][:, :, ts], metrics["KL"][:, :, ts, :], metrics["JS"][:, :, ts], metrics["JS_marginal"][:, :, ts, :], metrics["ill_conditioned"][:, :, ts] = getCloudMetrics(obs_list, t_prev, cloud_is_active, norm_quantities, rng, ts+1, None)
+            metrics["likelihood_msmt_weighted"][:, :, ts],  metrics["entropy_msmt_weighted"][:, :, ts], _, metrics["likelihood_msmt_best"][:, :, ts], metrics["entropy_msmt_best"][:, :, ts], _, _, metrics["AIC_msmt"][:, :, ts], _, _, _, _, _, _, _ = getCloudMetrics(obs_list, t_prev, cloud_is_active, norm_quantities, rng, ts+1, None, h=h)
         
         # Check whether object is still within each cloud, return success = False if not
         for ob, cloud in zip(*np.where(cloud_is_active)):
             if metrics["likelihood_state_weighted"][ob, cloud, ts] <= -100:
-                print(f"MC run failed at Ob: {ob}, Cloud: {cloud}, Time: {all_timesteps[ts+1]*normalization_quantities['time2hr']}")
+                print(f"MC run failed at Ob: {ob}, Cloud: {cloud}, Time: {all_timesteps[ts+1]*norm_quantities['time2hr']}")
                 return success, ob, cloud, ts
         
         
         #%% Propagation Step
         t_prior = all_timesteps[ts+1]
         interval = t_prior - t_prev
-        #Xm_cloud = np.empty((total_num_agents, total_num_clouds), dtype=object)
-        Xm_cloud = np.full((total_num_agents, total_num_clouds, Lp[ob, 0], 6), np.nan)
+        msmt_mask = combined_msmt_data[ts+1, 1, :]
         for ob in np.where(cloud_is_active[:, 0])[0]:
             for cloud in np.where(cloud_is_active[ob])[0]:
                 #cloud_for_matlab = np.copy(Xp_cloudp[ob, cloud])
                 #sci.io.savemat(load_loc2/f"cloud_for_matlab_{ts+1}.mat", {"Xp_cloudp_temp": cloud_for_matlab})
                 
-                Xm_cloud_temp = propagate(Xp_cloudp[ob, cloud], t_prev, interval, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
+                Xm_cloud_temp = propagate(np.copy(obs_list[ob][cloud].topo_cloud_post), t_prev, interval, obs_list[ob][cloud].lat, obs_list[ob][cloud].lon, obs_list[ob][cloud].el, norm_quantities)
                 #Xm_cloud_temp = sci.io.loadmat(load_loc2/f"propagate{ts+1}.mat")
                 #Xm_cloud_temp = Xm_cloud_temp['Xm_cloud_tmp']
-                if enforce_bounds:
-                    print()
-                    #Xm_cloud[ob][cloud] = enforceCislunarBounds(Xm_cloud_temp, t_prior, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
+                if enforce_bounds and msmt_mask[ob] and t_prior*norm_quantities["time2hr"] <= 150:
+                    obs_list[ob][cloud].topo_cloud_prior = enforceCislunarBounds(Xm_cloud_temp, t_prior, obs_list[ob][cloud].lat, obs_list[ob][cloud].lon, obs_list[ob][cloud].el, norm_quantities, low_lim, up_lim, vel_lim)
                 else:
                     # TODO: Check if Xm_cloud changes if temp gets changed/reset
-                    Xm_cloud[ob, cloud] = Xm_cloud_temp.copy()
-            #if combined_state_data[ts+1, 1:, ob].reshape(1, -1) is not np.nan:
-            X_truth[ob, 0, :] = combined_state_data[ts+1, 1:, 1].reshape(1, -1)#propagate(X_truth[ob], t_prev, interval, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
-            #else:
-            #X_truth[ob] = propagate(X_truth[ob], t_prev, interval, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
-        
-        print(f"Timestamp: {t_prior*normalization_quantities['time2hr']:3.2f}")
-        if abs(t_prior*normalization_quantities['time2hr']-42) <= 1e-6:
-            print()
+                    obs_list[ob][cloud].topo_cloud_prior = np.copy(Xm_cloud_temp)
+                #print(obs_list[ob][cloud].n_particles("prior"))
+            #obs_list[ob][0].topo_truth = propagate(obs_list[ob][0].topo_truth, t_prev, interval, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
+            obs_list[ob][0].topo_truth = combined_state_data[ts+1, 1:, ob].reshape(1, -1)#propagate(X_truth[ob], t_prev, interval, obs_lat[ob], obs_lon[ob], obs_el[ob], norm_quantities)
+            
+        #print(f"Timestamp: {t_prior*norm_quantities['time2hr']:3.2f}")
+
         
         #%% Update Step
-        #Xp_cloudp = np.empty((total_num_agents, total_num_clouds), dtype=object)
-        Xp_cloudp = np.full((total_num_agents, total_num_clouds, Lp[ob, 0], 6), np.nan)
-        # TODO: Make sure empty K rows are not impacting later code
-        msmt_mask = combined_msmt_data[ts+1, 1, :]
         msmt = np.full((total_num_agents, 2), np.nan)
         zt_cluster_likelihood = np.full((total_num_agents, total_num_clouds, Kmax), np.nan)#np.empty((total_num_agents, total_num_clouds), dtype=object)
         
-        cluster_prior_idx = np.full((total_num_agents, total_num_clouds, np.max(Lp)), np.nan)#np.empty((total_num_agents, total_num_clouds), dtype=object)
-        cluster_prior_means = np.full((total_num_agents, total_num_clouds, Kmax, 6), np.nan)#np.empty((total_num_agents, total_num_clouds), dtype=object)
-        cluster_prior_covs = np.full((total_num_agents, total_num_clouds, Kmax, 6, 6), np.nan)#np.empty((total_num_agents, total_num_clouds), dtype=object)
-        cluster_prior_weights = np.full((total_num_agents, total_num_clouds, Kmax), np.nan)#np.empty((total_num_agents, total_num_clouds), dtype=object)
-        
-        cluster_post_idx = np.full((total_num_agents, total_num_clouds, np.max(Lp)), np.nan)#np.empty((total_num_agents, total_num_clouds), dtype=object)
-        cluster_post_means = np.full((total_num_agents, total_num_clouds, Kmax, 6), np.nan)#np.empty((total_num_agents, total_num_clouds), dtype=object)
-        cluster_post_covs = np.full((total_num_agents, total_num_clouds, Kmax, 6, 6), np.nan)#np.empty((total_num_agents, total_num_clouds), dtype=object)
-        cluster_post_weights = np.full((total_num_agents, total_num_clouds, Kmax), np.nan)#np.empty((total_num_agents, total_num_clouds), dtype=object)
+        cluster_prior_idx = [[None for cloud in range(total_num_clouds)] for ob in range(total_num_agents)]#np.full((total_num_agents, total_num_clouds, np.max(Lp)), np.nan)#np.empty((total_num_agents, total_num_clouds), dtype=object)
+        cluster_post_idx = [[None for cloud in range(total_num_clouds)] for ob in range(total_num_agents)]#np.full((total_num_agents, total_num_clouds, np.max(Lp)), np.nan)#np.empty((total_num_agents, total_num_clouds), dtype=object)
         
         for ob, cloud in zip(*np.where(cloud_is_active)):
-            if msmt_mask[ob] == True:
-                # TODO: Add next line back in
-                #if K[ob, cloud] == 1:
-                K[ob, cloud] = Kmax
+            if msmt_mask[ob]:
+                obs_list[ob][cloud].K = Kmax
                 # Generate noisy (angles-only) measurement
-                msmt[ob, :] = getNoisyMeas(X_truth[ob], R_weight, h, rng)
+                msmt[ob, :] = getNoisyMeas(obs_list[ob][0].topo_truth, R_weight, h, rng)
                 
                 # Calc prior statistics
-                cluster_prior_idx[ob, cloud], cluster_prior_means_temp, cluster_prior_covs_temp, cluster_prior_weights_temp, K[ob, cloud] = cluster(Xm_cloud[ob, cloud], K[ob, cloud], rng, ts+2, load_loc2)
-                cluster_prior_means[ob, cloud, :K[ob, cloud]] = cluster_prior_means_temp
-                cluster_prior_covs[ob, cloud, :K[ob, cloud]] = cluster_prior_covs_temp
-                cluster_prior_weights[ob, cloud, :K[ob, cloud]] = cluster_prior_weights_temp
+                cluster_prior_idx[ob][cloud], cluster_prior_means_temp, cluster_prior_covs_temp, cluster_prior_weights_temp, obs_list[ob][cloud].K = cluster(obs_list[ob][cloud].topo_cloud_prior, obs_list[ob][cloud].K, rng, ts+2, None)
+                K_curr = obs_list[ob][cloud].K
                 
                 # Calc posterior statistics
-                for k in range(K[ob, cloud]):
-                    cluster_points = Xm_cloud[ob, cloud, cluster_prior_idx[ob, cloud] == k]
+                cluster_post_means_temp = np.full((obs_list[ob][cloud].K, 6), np.nan)
+                cluster_post_covs_temp = np.full((obs_list[ob][cloud].K, 6, 6), np.nan)
+                for k in range(K_curr):
+                    cluster_points = obs_list[ob][cloud].topo_cloud_prior[cluster_prior_idx[ob][cloud] == k]
                     # After vectorizing kalmanUpdate(), means/Covs may be off by 1e-12
-                    #cluster_post_means[ob, cloud, k], cluster_post_covs[ob, cloud, k] = kalmanUpdate(msmt[ob], cluster_points, R_weight, cluster_prior_means[ob, cloud, k], cluster_prior_covs[ob, cloud, k], h)
-                    cluster_post_means[ob, cloud, k], cluster_post_covs[ob, cloud, k] = kalmanUpdate2(msmt[ob], cluster_points, R_weight, cluster_prior_means[ob, cloud, k], cluster_prior_covs[ob, cloud, k], h)
-                    cluster_post_covs[ob, cloud, k] = (cluster_post_covs[ob, cloud, k] + cluster_post_covs[ob, cloud, k].T)/2
-                cluster_post_weights[ob, cloud, :K[ob, cloud]], zt_cluster_likelihood[ob, cloud, :K[ob, cloud]] = weightUpdate(cluster_prior_weights[ob, cloud, :K[ob, cloud]], Xm_cloud[ob, cloud], cluster_prior_idx[ob, cloud], msmt[ob], R_weight, h)
+                    cluster_post_means_temp[k], cluster_post_covs_temp[k] = kalmanUpdate2(msmt[ob], cluster_points, R_weight, cluster_prior_means_temp[k], cluster_prior_covs_temp[k], h)
+                    cluster_post_covs_temp[k] = (cluster_post_covs_temp[k] + cluster_post_covs_temp[k].T)/2
+                cluster_post_weights_temp, zt_cluster_likelihood[ob, cloud, :K_curr] = weightUpdate(cluster_prior_weights_temp, obs_list[ob][cloud].topo_cloud_prior, cluster_prior_idx[ob][cloud], msmt[ob], R_weight, h)
                 
                 # Resample
-                #Xp_cloudp[ob, cloud] = np.zeros(Xm_cloud[ob, cloud].shape)
-                #for particle in range(Lp[ob, 0]):
-                #    Xp_cloudp[ob, cloud][particle, :], cluster_post_idx[ob, cloud, particle] = drawFrom(cluster_post_weights[ob, cloud], cluster_post_means[ob, cloud], cluster_post_covs[ob, cloud], Lp[ob, 0], rng)#drawFrom(cluster_post_weights[ob, cloud], cluster_post_means[ob, cloud], cluster_post_covs[ob, cloud], Lp[ob, 0])
-                Xp_cloudp[ob, cloud], cluster_post_idx[ob, cloud] = drawFrom2(cluster_post_weights[ob, cloud, :K[ob, cloud]], cluster_post_means[ob, cloud, :K[ob, cloud]], cluster_post_covs[ob, cloud, :K[ob, cloud]], Lp[ob, 0], rng)
+                obs_list[ob][cloud].topo_cloud_post, cluster_post_idx[ob][cloud] = drawFrom2(cluster_post_weights_temp, cluster_post_means_temp, cluster_post_covs_temp, obs_list[ob][cloud].max_particles, rng)
                 #Xp_cloudp_temp = sci.io.loadmat(load_loc2/f"drawFrom{ts+2}.mat")
                 #Xp_cloudp[ob, cloud] = Xp_cloudp_temp['Xp_cloudp_temp']
                 #cluster_post_idx_temp = sci.io.loadmat(load_loc2/f"drawFromIdx{ts+2}.mat")
-                #cluster_post_idx[ob, cloud] = cluster_post_idx_temp['c_id_temp'].flatten() - 1
                 # Add 1 to each cluster idx (plotting purposes)
-                cluster_prior_idx[ob, cloud] += 1
-                cluster_post_idx[ob, cloud] += 1
+                cluster_prior_idx[ob][cloud] += 1
+                cluster_post_idx[ob][cloud] += 1
             else:
                 # Resample
                 #cloud_for_matlab = np.copy(Xm_cloud[ob, cloud])
                 #sci.io.savemat(f"cloud_for_matlab_{ts+2}.mat", {"Xm_cloud_temp": cloud_for_matlab})
-                Xp_cloudp[ob, cloud] = np.copy(Xm_cloud[ob, cloud])
-                cluster_post_idx[ob, cloud] = np.ones((Xp_cloudp[ob, cloud].shape[0]))
+                obs_list[ob][cloud].topo_cloud_post = np.copy(obs_list[ob][cloud].topo_cloud_prior)
+                cluster_post_idx[ob][cloud] = np.ones((obs_list[ob][cloud].n_particles("post")))
             
-        #metric_cloud = cf.Topo2Synodic(np.copy(Xp_cloudp[ob, cloud]), t_prev, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
-        #metric_truth = cf.Topo2Synodic(np.copy(X_truth[ob]), t_prev, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
-        #metrics["likelihood_state_weighted"][ob, cloud, ts+1],  metrics["entropy_state_weighted"][ob, cloud, ts+1], metrics["RMSE"][ob, cloud, ts+1, :], metrics["likelihood_state_best"][ob, cloud, ts+1], metrics["entropy_state_best"][ob, cloud, ts+1], metrics["num_cluster"][ob, cloud, ts+1], metrics["num_particles"][ob, cloud, ts+1], metrics["AIC_state"][ob, cloud, ts+1], metrics["avg_ob_ob_likeli"][ob, cloud, ts+1], metrics["avg_ob_ob_weight_loglikeli"][ob, cloud, ts+1], metrics["avg_cross_entropy"][ob, cloud, ts+1] = getCloudMetrics(np.copy(Xp_cloudp), np.copy(X_truth), t_prior, cloud_is_active, K[ob, cloud], obs_lat, obs_lon, obs_el, normalization_quantities, rng, ts+2, load_loc2)
-        #metrics["likelihood_msmt_weighted"][ob, cloud, ts+1],  metrics["entropy_msmt_weighted"][ob, cloud, ts+1], _, metrics["likelihood_msmt_best"][ob, cloud, ts+1], metrics["entropy_msmt_best"][ob, cloud, ts+1], _, _, metrics["AIC_msmt"][ob, cloud, ts+1], _, _, _ = getCloudMetrics(np.copy(Xp_cloudp), np.copy(X_truth), t_prior, cloud_is_active, K[ob, cloud], obs_lat, obs_lon, obs_el, normalization_quantities, rng, ts+2, load_loc2, h=h)
-        
         #%% Plot Priors
         for ob in np.where(cloud_is_active[:, 0])[0]:
-            if msmt_mask[ob] == True:
+            if msmt_mask[ob]:
                 # Plot a single cloud of observer ob
                 for cloud in np.where(cloud_is_active[ob])[0]:
                     if plot_indv_clouds[ob]:
-                        plotting_cloud = np.copy(Xm_cloud[ob, cloud])
-                        plotting_truth = np.copy(X_truth[ob])
+                        plotting_cloud = np.copy(obs_list[ob][cloud].topo_cloud_prior)
+                        plotting_truth = np.copy(obs_list[ob][0].topo_truth)
                         plot.plotStateSpace(plotting_cloud,
                                             plotting_truth, 
-                                            K[ob, cloud],
-                                            cluster_prior_idx[ob, cloud], 
-                                            normalization_quantities, 
-                                            f"Timestep: {t_prior*normalization_quantities['time2hr']:3.2f} Hours (Prior) Obs: {ob}",
+                                            obs_list[ob][cloud].K,
+                                            cluster_prior_idx[ob][cloud], 
+                                            norm_quantities, 
+                                            f"Timestep: {t_prior*norm_quantities['time2hr']:3.2f} Hours (Prior) Obs: {ob}",
                                             save_loc/f"Observer{ob}"/"Topo"/f"Timestep_{ts+1}_1B_cloud_{cloud}.png")
                         plot.plotMsmtSpace(plotting_cloud,
                                             plotting_truth,
                                             msmt[ob],
                                             h,
                                             zt_cluster_likelihood[ob, cloud],
-                                            K[ob, cloud],
-                                            cluster_prior_idx[ob, cloud],
-                                            f"Az-El Timestep: {t_prior*normalization_quantities['time2hr']:3.2f} Hours (Prior) Obs: {ob}",
+                                            obs_list[ob][cloud].K,
+                                            cluster_prior_idx[ob][cloud],
+                                            f"Az-El Timestep: {t_prior*norm_quantities['time2hr']:3.2f} Hours (Prior) Obs: {ob}",
                                             save_loc/f"Observer{ob}"/"Topo"/f"Timestep_{ts+1}_1C_cloud_{cloud}.png",
                                             msmt_mask[ob])
                         # TODO: Add ECI plots back in
-                        plotting_cloud = cf.Topo2Synodic(np.copy(Xm_cloud[ob, cloud]), t_prior, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
-                        plotting_truth = cf.Topo2Synodic(np.copy(X_truth[ob]), t_prior, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
+                        plotting_cloud = cf.Topo2Synodic(np.copy(obs_list[ob][cloud].topo_cloud_prior), t_prior, obs_list[ob][cloud].lat, obs_list[ob][cloud].lon, obs_list[ob][cloud].el, norm_quantities)
+                        plotting_truth = cf.Topo2Synodic(np.copy(obs_list[ob][0].topo_truth), t_prior, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
                         plot.plotStateSpace(plotting_cloud,
                                             plotting_truth, 
-                                            K[ob, cloud],
-                                            cluster_prior_idx[ob, cloud], 
-                                            normalization_quantities, 
-                                            f"Timestep: {t_prior*normalization_quantities['time2hr']:3.2f} Hours (Prior) Obs: {ob}",
+                                            obs_list[ob][cloud].K,
+                                            cluster_prior_idx[ob][cloud], 
+                                            norm_quantities, 
+                                            f"Timestep: {t_prior*norm_quantities['time2hr']:3.2f} Hours (Prior) Obs: {ob}",
                                             save_loc/f"Observer{ob}"/"Synodic"/f"Timestep_{ts+1}_1B_cloud_{cloud}.png")
                 
                 # Plot all clouds of observer ob
                 if plot_combined_clouds[ob] and np.sum(cloud_is_active[ob, :]) >= 2:
-                    plotting_cloud = np.vstack(Xm_cloud[ob, :num_clouds_per_agent[ob]])
-                    plotting_truth = np.copy(X_truth[ob])
-                    plotting_idx = np.repeat(np.arange(num_clouds_per_agent[ob])+1, Lp[ob, 0])
+                    active_clouds = np.where(cloud_is_active[ob])[0]
+                    plotting_cloud = np.vstack([obs_list[ob][cloud].topo_cloud_prior for cloud in active_clouds])
+                    plotting_truth = np.copy(obs_list[ob][0].topo_truth)
+                    # TODO: Next line won't work if diff num particles per cloud (already true)
+                    plotting_idx = np.hstack([np.repeat(cloud+1, obs_list[ob][cloud].n_particles("prior")) for cloud in active_clouds]).T
+                    cloud_names_temp = [obs_list[ob][cloud].name for cloud in active_clouds]
                     plot.plotStateSpace(plotting_cloud,
                                         plotting_truth, 
                                         num_clouds_per_agent[ob],
                                         plotting_idx, 
-                                        normalization_quantities, 
-                                        f"Timestep: {t_prior*normalization_quantities['time2hr']:3.2f} Hours (Prior) Obs: {ob}",
+                                        norm_quantities, 
+                                        f"Timestep: {t_prior*norm_quantities['time2hr']:3.2f} Hours (Prior) Obs: {ob}",
                                         save_loc/f"Observer{ob}"/"Topo"/"Combined"/f"Timestep_{ts+1}_1B_combined.png",
                                         plot_cross_observers = True,
-                                        cloud_names = cloud_names[ob])
+                                        cloud_names = cloud_names_temp)
                     plot.plotMsmtSpace(plotting_cloud,
                                         plotting_truth,
                                         msmt[ob],
@@ -1067,39 +1088,41 @@ def main(MC_idx):
                                         None,
                                         num_clouds_per_agent[ob],
                                         plotting_idx,
-                                        f"Az-El Timestep: {t_prior*normalization_quantities['time2hr']:3.2f} Hours (Prior) Obs: {ob}",
+                                        f"Az-El Timestep: {t_prior*norm_quantities['time2hr']:3.2f} Hours (Prior) Obs: {ob}",
                                         save_loc/f"Observer{ob}"/"Topo"/"Combined"/f"Timestep_{ts+1}_1C_cloud_combined.png",
                                         msmt_mask[ob],
                                         plot_cross_observers=True,
-                                        cloud_names = cloud_names[ob])
+                                        cloud_names = cloud_names_temp)
                     
-                    plotting_cloud = cf.Topo2Synodic(np.copy(plotting_cloud), t_prior, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
-                    plotting_truth = cf.Topo2Synodic(np.copy(plotting_truth), t_prior, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
+                    plotting_cloud = cf.Topo2Synodic(np.copy(plotting_cloud), t_prior, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
+                    plotting_truth = cf.Topo2Synodic(np.copy(plotting_truth), t_prior, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
                     plot.plotStateSpace(plotting_cloud,
                                         plotting_truth, 
                                         num_clouds_per_agent[ob],
                                         plotting_idx, 
-                                        normalization_quantities, 
-                                        f"Timestep: {t_prior*normalization_quantities['time2hr']:3.2f} Hours (Prior) Obs: {ob}",
+                                        norm_quantities, 
+                                        f"Timestep: {t_prior*norm_quantities['time2hr']:3.2f} Hours (Prior) Obs: {ob}",
                                         save_loc/f"Observer{ob}"/"Synodic"/"Combined"/f"Timestep_{ts+1}_1B_combined.png",
                                         plot_cross_observers = True,
-                                        cloud_names = cloud_names[ob])
+                                        cloud_names = cloud_names_temp)
         
         # Plot original clouds across all observers
         if num_active_obs >= 2 and plot_cross_observers:
-            plotting_cloud = np.vstack(Xm_cloud[cloud_is_active[:, 0], 0])
-            plotting_idx = np.repeat(np.asarray(np.where(cloud_is_active[:, 0]))+1, Lp[cloud_is_active[:, 0], 0])
-            plotting_cloud = cf.Topo2Synodic(np.copy(plotting_cloud), t_prior, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
-            plotting_truth = cf.Topo2Synodic(np.copy(X_truth[ob]), t_prior, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
+            active_obs =  np.where(cloud_is_active[:, 0])[0]
+            plotting_cloud = np.vstack([cf.Topo2Synodic(np.copy(obs_list[ob][0].topo_cloud_prior), t_prior, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities) for ob in active_obs]) #np.vstack(Xm_cloud[cloud_is_active[:, 0], 0])
+            plotting_idx = np.hstack([np.repeat(ob+1, obs_list[ob][0].n_particles("prior")) for ob in active_obs]).T #np.repeat(np.asarray(np.where(cloud_is_active[:, 0]))+1, Lp[cloud_is_active[:, 0], 0])
+            #plotting_cloud = cf.Topo2Synodic(np.copy(obs_list[ob][0].topo_cloud_prior), t_prior, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
+            plotting_truth = cf.Topo2Synodic(np.copy(obs_list[ob][0].topo_truth), t_prior, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
+            cloud_names_temp = [obs_list[ob][0].name for ob in active_obs]
             plot.plotStateSpace(plotting_cloud,
                                 plotting_truth, 
-                                total_num_agents,
+                                num_active_obs,
                                 plotting_idx, 
-                                normalization_quantities, 
-                                f"Timestep: {t_prior*normalization_quantities['time2hr']:3.2f} Hours (Prior)",
+                                norm_quantities, 
+                                f"Timestep: {t_prior*norm_quantities['time2hr']:3.2f} Hours (Prior)",
                                 save_loc/"CrossOb"/"Synodic"/f"Timestep_{ts+1}_1D_cloud_{cloud}.png",
                                 plot_cross_observers = True,
-                                cloud_names = [row[0] for row in cloud_names])
+                                cloud_names = cloud_names_temp)
             
         
         #%% Plot Posterior
@@ -1107,14 +1130,14 @@ def main(MC_idx):
             # Plot a single cloud of observer ob
             for cloud in np.where(cloud_is_active[ob])[0]:
                 if plot_indv_clouds[ob]:
-                    plotting_cloud = np.copy(Xp_cloudp[ob, cloud])
-                    plotting_truth = np.copy(X_truth[ob])
+                    plotting_cloud = np.copy(obs_list[ob][cloud].topo_cloud_post)
+                    plotting_truth = np.copy(obs_list[ob][0].topo_truth)
                     plot.plotStateSpace(plotting_cloud,
                                         plotting_truth, 
-                                        K[ob, cloud],
-                                        cluster_post_idx[ob, cloud], 
-                                        normalization_quantities, 
-                                        f"Timestep: {t_prior*normalization_quantities['time2hr']:3.2f} Hours (Post) Obs: {ob}",
+                                        obs_list[ob][cloud].K,
+                                        cluster_post_idx[ob][cloud], 
+                                        norm_quantities, 
+                                        f"Timestep: {t_prior*norm_quantities['time2hr']:3.2f} Hours (Post) Obs: {ob}",
                                         save_loc/f"Observer{ob}"/"Topo"/f"Timestep_{ts+1}_2B_cloud_{cloud}.png")
 
                     plot.plotMsmtSpace(plotting_cloud,
@@ -1122,36 +1145,38 @@ def main(MC_idx):
                                         msmt[ob],
                                         h,
                                         zt_cluster_likelihood[ob, cloud],
-                                        K[ob, cloud],
-                                        cluster_post_idx[ob, cloud],
-                                        f"Az-El Timestep: {t_prior*normalization_quantities['time2hr']:3.2f} Hours (Post) Obs: {ob}",
+                                        obs_list[ob][cloud].K,
+                                        cluster_post_idx[ob][cloud],
+                                        f"Az-El Timestep: {t_prior*norm_quantities['time2hr']:3.2f} Hours (Post) Obs: {ob}",
                                         save_loc/f"Observer{ob}"/"Topo"/f"Timestep_{ts+1}_2C_cloud_{cloud}.png",
                                         msmt_mask[ob])
                     # TODO: Add ECI plots back in
-                    plotting_cloud = cf.Topo2Synodic(np.copy(Xp_cloudp[ob, cloud]), t_prior, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
-                    plotting_truth = cf.Topo2Synodic(np.copy(X_truth[ob]), t_prior, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
+                    plotting_cloud = cf.Topo2Synodic(np.copy(obs_list[ob][cloud].topo_cloud_post), t_prior, obs_list[ob][cloud].lat, obs_list[ob][cloud].lon, obs_list[ob][cloud].el, norm_quantities)
+                    plotting_truth = cf.Topo2Synodic(np.copy(obs_list[ob][0].topo_truth), t_prior, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
                     plot.plotStateSpace(plotting_cloud,
                                         plotting_truth, 
-                                        K[ob, cloud],
-                                        cluster_post_idx[ob, cloud], 
-                                        normalization_quantities, 
-                                        f"Timestep: {t_prior*normalization_quantities['time2hr']:3.2f} Hours (Post) Obs: {ob}",
+                                        obs_list[ob][cloud].K,
+                                        cluster_post_idx[ob][cloud], 
+                                        norm_quantities, 
+                                        f"Timestep: {t_prior*norm_quantities['time2hr']:3.2f} Hours (Post) Obs: {ob}",
                                         save_loc/f"Observer{ob}"/"Synodic"/f"Timestep_{ts+1}_2B_cloud_{cloud}.png")
             
             # Plot all clouds of observer ob
             if plot_combined_clouds[ob] and np.sum(cloud_is_active[ob, :]) >= 2:
-                plotting_cloud = np.vstack(Xp_cloudp[ob, :num_clouds_per_agent[ob]])
-                plotting_truth = np.copy(X_truth[ob])
-                plotting_idx = np.repeat(np.arange(num_clouds_per_agent[ob])+1, Lp[ob, 0])
+                active_clouds = np.where(cloud_is_active[ob])[0]
+                plotting_cloud = np.vstack([obs_list[ob][cloud].topo_cloud_post for cloud in active_clouds])
+                plotting_truth = np.copy(obs_list[ob][0].topo_truth)
+                plotting_idx = np.hstack([np.repeat(cloud+1, obs_list[ob][cloud].n_particles("post")) for cloud in active_clouds]).T
+                cloud_names_temp = [obs_list[ob][cloud].name for cloud in active_clouds]
                 plot.plotStateSpace(plotting_cloud,
                                     plotting_truth, 
                                     num_clouds_per_agent[ob],
                                     plotting_idx, 
-                                    normalization_quantities, 
-                                    f"Timestep: {t_prior*normalization_quantities['time2hr']:3.2f} Hours (Post) Obs: {ob}",
+                                    norm_quantities, 
+                                    f"Timestep: {t_prior*norm_quantities['time2hr']:3.2f} Hours (Post) Obs: {ob}",
                                     save_loc/f"Observer{ob}"/"Topo"/"Combined"/f"Timestep_{ts+1}_2B_combined.png",
                                     plot_cross_observers = True,
-                                    cloud_names = cloud_names[ob])
+                                    cloud_names = cloud_names_temp)
                 plot.plotMsmtSpace(plotting_cloud,
                                     plotting_truth,
                                     msmt[ob],
@@ -1159,88 +1184,94 @@ def main(MC_idx):
                                     None,
                                     num_clouds_per_agent[ob],
                                     plotting_idx,
-                                    f"Az-El Timestep: {t_prior*normalization_quantities['time2hr']:3.2f} Hours (Post) Obs: {ob}",
+                                    f"Az-El Timestep: {t_prior*norm_quantities['time2hr']:3.2f} Hours (Post) Obs: {ob}",
                                     save_loc/f"Observer{ob}"/"Topo"/"Combined"/f"Timestep_{ts+1}_2C_cloud_combined.png",
                                     msmt_mask[ob],
                                     plot_cross_observers=True,
-                                    cloud_names = cloud_names[ob])
+                                    cloud_names = cloud_names_temp)
                 
-                plotting_cloud = cf.Topo2Synodic(np.copy(plotting_cloud), t_prior, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
-                plotting_truth = cf.Topo2Synodic(np.copy(plotting_truth), t_prior, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
+                plotting_cloud = cf.Topo2Synodic(np.copy(plotting_cloud), t_prior, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
+                plotting_truth = cf.Topo2Synodic(np.copy(plotting_truth), t_prior, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
                 plot.plotStateSpace(plotting_cloud,
                                     plotting_truth, 
                                     num_clouds_per_agent[ob],
                                     plotting_idx, 
-                                    normalization_quantities, 
-                                    f"Timestep: {t_prior*normalization_quantities['time2hr']:3.2f} Hours (Post) Obs: {ob}",
+                                    norm_quantities, 
+                                    f"Timestep: {t_prior*norm_quantities['time2hr']:3.2f} Hours (Post) Obs: {ob}",
                                     save_loc/f"Observer{ob}"/"Synodic"/"Combined"/f"Timestep_{ts+1}_2B_combined.png",
                                     plot_cross_observers = True,
-                                    cloud_names = cloud_names[ob])
+                                    cloud_names = cloud_names_temp)
         
         # Plot original clouds across all observers
         if num_active_obs >= 2 and plot_cross_observers and np.any(msmt_mask == True):
-            plotting_cloud = np.vstack(Xp_cloudp[cloud_is_active[:, 0], 0])
-            plotting_idx = np.repeat(np.asarray(np.where(cloud_is_active[:, 0]))+1, Lp[cloud_is_active[:, 0], 0])
-            plotting_cloud = cf.Topo2Synodic(np.copy(plotting_cloud), t_prior, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
-            plotting_truth = cf.Topo2Synodic(np.copy(X_truth[ob]), t_prior, obs_lat[ob], obs_lon[ob], obs_el[ob], normalization_quantities)
+            active_obs =  np.where(cloud_is_active[:, 0])[0]
+            plotting_cloud = np.vstack([cf.Topo2Synodic(np.copy(obs_list[ob][0].topo_cloud_post), t_prior, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities) for ob in active_obs]) #np.vstack(Xp_cloudp[cloud_is_active[:, 0], 0])
+            plotting_idx = np.hstack([np.repeat(ob+1, obs_list[ob][0].n_particles("post")) for ob in active_obs]).T #np.repeat(np.asarray(np.where(cloud_is_active[:, 0]))+1, Lp[cloud_is_active[:, 0], 0])
+            #plotting_cloud = cf.Topo2Synodic(np.copy(obs_list[ob][0].topo_cloud_post), t_prior, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
+            plotting_truth = cf.Topo2Synodic(np.copy(obs_list[ob][0].topo_truth), t_prior, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
+            cloud_names_temp = [obs_list[ob][0].name for ob in active_obs]
             plot.plotStateSpace(plotting_cloud,
                                 plotting_truth, 
-                                total_num_agents,
+                                num_active_obs,
                                 plotting_idx, 
-                                normalization_quantities, 
-                                f"Timestep: {t_prior*normalization_quantities['time2hr']:3.2f} Hours (Post)",
+                                norm_quantities, 
+                                f"Timestep: {t_prior*norm_quantities['time2hr']:3.2f} Hours (Post)",
                                 save_loc/"CrossOb"/"Synodic"/f"Timestep_{ts+1}_2D_cloud_{cloud}.png",
                                 plot_cross_observers = True,
-                                cloud_names = [row[0] for row in cloud_names])
+                                cloud_names = cloud_names_temp)
         
         
     #%% Plot and save metrics
-    x = all_timesteps*normalization_quantities['time2hr']
+    x = all_timesteps*norm_quantities['time2hr']
+    active_obs, active_clouds =  np.where(cloud_is_active)
+    #active_clouds =  np.where(cloud_is_active[active_obs, :])[0]
     
     np.savez(save_loc / "metrics.npz", **metrics)
-    np.savez(save_loc / "normalization_quantities.npz", **normalization_quantities)
+    np.savez(save_loc / "norm_quantities.npz", **norm_quantities)
+    cloud_names = [[cloud.name for cloud in ob] for ob in obs_list]
     with open(save_loc / "cloud_names.json", 'w') as f:
         json.dump(cloud_names, f)
+    linestyle = [[cloud.linestyle for cloud in ob] for ob in obs_list]
     with open(save_loc / "linestyle.json", 'w') as f:
         json.dump(linestyle, f)
     np.save(save_loc / "timesteps", x)
 
     for ob in np.where(cloud_is_active[:, 0])[0]:
         # Likelihood metrics
-        plot.plotMetrics(x, metrics["likelihood_state_weighted"][ob], cloud_names[ob], linestyle[ob], save_loc, ob, "Log-Likelihood", f"GMM: Full, State Space, Log-Likelihood Ob: {ob} vs. Time", "likelihood_state_weighted.png")
-        plot.plotMetrics(x, metrics["likelihood_state_best"][ob], cloud_names[ob], linestyle[ob], save_loc, ob, "Log-Likelihood", f"GMM: Best Mode, State Space, Log-Likelihood Ob: {ob} vs. Time", "likelihood_state_best.png")
-        plot.plotMetrics(x, metrics["likelihood_msmt_weighted"][ob], cloud_names[ob], linestyle[ob], save_loc, ob, "Log-Likelihood", f"GMM: Full, Msmt Space, Log-Likelihood Ob: {ob} vs. Time", "likelihood_msmt_weighted.png")
-        plot.plotMetrics(x, metrics["likelihood_msmt_best"][ob], cloud_names[ob], linestyle[ob], save_loc, ob, "Log-Likelihood", f"GMM: Best Mode, Msmt Space, Log-Likelihood Ob: {ob} vs. Time", "likelihood_msmt_best.png")
+        plot.plotMetrics(x, metrics["likelihood_state_weighted"][ob], cloud_names[ob], linestyle[ob], save_loc, ob, "Log-Likelihood", f"GMM: Full, State Space, Log-Likelihood Ob: {ob} vs. Time", "likelihood_state_weighted.pdf")
+        plot.plotMetrics(x, metrics["likelihood_state_best"][ob], cloud_names[ob], linestyle[ob], save_loc, ob, "Log-Likelihood", f"GMM: Best Mode, State Space, Log-Likelihood Ob: {ob} vs. Time", "likelihood_state_best.pdf")
+        plot.plotMetrics(x, metrics["likelihood_msmt_weighted"][ob], cloud_names[ob], linestyle[ob], save_loc, ob, "Log-Likelihood", f"GMM: Full, Msmt Space, Log-Likelihood Ob: {ob} vs. Time", "likelihood_msmt_weighted.pdf")
+        plot.plotMetrics(x, metrics["likelihood_msmt_best"][ob], cloud_names[ob], linestyle[ob], save_loc, ob, "Log-Likelihood", f"GMM: Best Mode, Msmt Space, Log-Likelihood Ob: {ob} vs. Time", "likelihood_msmt_best.pdf")
         
         # Entropy metrics
-        plot.plotMetrics(x, metrics["entropy_state_weighted"][ob], cloud_names[ob], linestyle[ob], save_loc, ob, "Entropy", f"GMM: Full, State Space, Entropy Ob: {ob} vs. Time", "entropy_state_weighted.png")
-        #plot.plotMetrics(x, metrics["entropy_state_best"][ob], cloud_names[ob], save_loc, ob, "Entropy", f"GMM: Best Mode, State Space, Entropy Ob: {ob} vs. Time", "entropy_state_best.png")
+        plot.plotMetrics(x, metrics["entropy_state_weighted"][ob], cloud_names[ob], linestyle[ob], save_loc, ob, "Entropy", f"GMM: Full, State Space, Entropy Ob: {ob} vs. Time", "entropy_state_weighted.pdf")
+        #plot.plotMetrics(x, metrics["entropy_state_best"][ob], cloud_names[ob], save_loc, ob, "Entropy", f"GMM: Best Mode, State Space, Entropy Ob: {ob} vs. Time", "entropy_state_best.pdf")
         # TODO: Look into next metric of next line
-        plot.plotMetrics(x, metrics["entropy_msmt_weighted"][ob], cloud_names[ob], linestyle[ob], save_loc, ob, "Entropy", f"GMM: Full, Msmt Space, Entropy Ob: {ob} vs. Time", "entropy_msmt_weighted.png")
-        plot.plotMetrics(x, metrics["entropy_msmt_best"][ob], cloud_names[ob], linestyle[ob], save_loc, ob, "Entropy", f"GMM: Best Mode, Msmt Space, Entropy Ob: {ob} vs. Time", "entropy_msmt_best.png")
+        plot.plotMetrics(x, metrics["entropy_msmt_weighted"][ob], cloud_names[ob], linestyle[ob], save_loc, ob, "Entropy", f"GMM: Full, Msmt Space, Entropy Ob: {ob} vs. Time", "entropy_msmt_weighted.pdf")
+        plot.plotMetrics(x, metrics["entropy_msmt_best"][ob], cloud_names[ob], linestyle[ob], save_loc, ob, "Entropy", f"GMM: Best Mode, Msmt Space, Entropy Ob: {ob} vs. Time", "entropy_msmt_best.pdf")
         
         # AIC metrics
-        plot.plotMetrics(x, metrics["AIC_state"][ob], cloud_names[ob], linestyle[ob], save_loc, ob, "AIC", f"State Space, AIC Ob: {ob} vs. Time", "AIC_state.png")
-        plot.plotMetrics(x, metrics["AIC_msmt"][ob], cloud_names[ob], linestyle[ob], save_loc, ob, "AIC", f"Msmt Space, AIC Ob: {ob} vs. Time", "AIC_msmt.png")
+        plot.plotMetrics(x, metrics["AIC_state"][ob], cloud_names[ob], linestyle[ob], save_loc, ob, "AIC", f"State Space, AIC Ob: {ob} vs. Time", "AIC_state.pdf")
+        plot.plotMetrics(x, metrics["AIC_msmt"][ob], cloud_names[ob], linestyle[ob], save_loc, ob, "AIC", f"Msmt Space, AIC Ob: {ob} vs. Time", "AIC_msmt.pdf")
         
         # Misc metrics
-        plot.plotMetrics(x, metrics["num_cluster"][ob], cloud_names[ob], linestyle[ob], save_loc, ob, "Number of Clusters", f"Number of Metric Clusters Ob: {ob} vs. Time", "num_clusters.png")
-        plot.plotMetrics(x, metrics["num_particles"][ob], cloud_names[ob], linestyle[ob], save_loc, ob, "Number of Particles", f"Number of Particles Ob: {ob} vs. Time", "num_particles.png")
+        plot.plotMetrics(x, metrics["num_cluster"][ob], cloud_names[ob], linestyle[ob], save_loc, ob, "Number of Clusters", f"Number of Metric Clusters Ob: {ob} vs. Time", "num_clusters.pdf")
+        plot.plotMetrics(x, metrics["num_particles"][ob], cloud_names[ob], linestyle[ob], save_loc, ob, "Number of Particles", f"Number of Particles Ob: {ob} vs. Time", "num_particles.pdf")
         
-        #plot.plotMetrics(x, metrics["ill_conditioned"][ob], cloud_names[ob], save_loc, ob, "Number of Particles", f"Number of Particles Ob: {ob} vs. Time", "num_particles.png")
+        #plot.plotMetrics(x, metrics["ill_conditioned"][ob], cloud_names[ob], save_loc, ob, "Number of Particles", f"Number of Particles Ob: {ob} vs. Time", "num_particles.pdf")
         # TODO: Fix next plot
-        plot.plotMetricsPerState(x, metrics["RMSE"][ob], normalization_quantities, cloud_names[ob], linestyle[ob], save_loc, ob, "RMSE (km, kms)", "RMSE Slice vs. Time", "RMSE")
+        plot.plotMetricsPerState(x, metrics["RMSE"][ob], norm_quantities, cloud_names[ob], linestyle[ob], save_loc, ob, "RMSE (km, kms)", "RMSE Slice vs. Time", "RMSE")
     
     names = [row[0] for row in cloud_names][1:]
     ls = [row[0] for row in linestyle][1:]
-    plot.plotMetrics(x, metrics["avg_ob_ob_likeli"][0, 1:], names, ls, save_loc, 0, "Ob-Ob Log-Likelihood", f"Ob {0} to Ob Likelihood vs. Time", "avg_ob_ob_likeli.png")
-    plot.plotMetrics(x, metrics["avg_ob_ob_weight_loglikeli"][0, 1:], names, ls, save_loc, 0, "Ob-Ob Log-Likelihood", f"Ob {0} to Ob Weighted Log-Likelihood vs. Time", "avg_ob_ob_weight_loglikeli.png")
-    plot.plotMetrics(x, metrics["avg_cross_entropy"][0, 1:], names, ls, save_loc, 0, "Cross Entropy", f"Ob {0} to Ob Cross Entropy vs. Time", "avg_cross_entropy.png")
-    plot.plotMetrics(x, metrics["KL"][0, 1:, :, 0], names, ls, save_loc, 0, "KL", f"Ob {0} to Ob KL Divergence vs. Time", "KL1.png")
-    plot.plotMetrics(x, metrics["KL"][0, 1:, :, 1], names, ls, save_loc, 0, "KL", f"Ob {0} to Ob KL Divergence vs. Time", "KL2.png")
-    plot.plotMetrics(x, metrics["KL"][0, 1:, :, 2], names, ls, save_loc, 0, "KL", f"Ob {0} to Ob Avg KL Divergence vs. Time", "KL.png")
-    plot.plotMetrics(x, metrics["JS"][0, 1:], names, ls, save_loc, 0, "JS", f"Ob {0} to Ob Jensen-Shannon Divergence vs. Time", "JS.png")
-    plot.plotMetricsPerState(x, metrics["JS_marginal"][0, 1:, :, :], normalization_quantities, names, ls, save_loc, 0, "JS Slice", "JS Slice vs. Time", "JSSLice")
+    plot.plotMetrics(x, metrics["avg_ob_ob_likeli"][0, 1:], names, ls, save_loc, 0, "Ob-Ob Log-Likelihood", f"Ob {0} to Ob Likelihood vs. Time", "avg_ob_ob_likeli.pdf")
+    plot.plotMetrics(x, metrics["avg_ob_ob_weight_loglikeli"][0, 1:], names, ls, save_loc, 0, "Ob-Ob Log-Likelihood", f"Ob {0} to Ob Weighted Log-Likelihood vs. Time", "avg_ob_ob_weight_loglikeli.pdf")
+    plot.plotMetrics(x, metrics["avg_cross_entropy"][0, 1:], names, ls, save_loc, 0, "Cross Entropy", f"Ob {0} to Ob Cross Entropy vs. Time", "avg_cross_entropy.pdf")
+    plot.plotMetrics(x, metrics["KL"][0, 1:, :, 0], names, ls, save_loc, 0, "KL", f"Ob {0} to Ob KL Divergence vs. Time", "KL1.pdf")
+    plot.plotMetrics(x, metrics["KL"][0, 1:, :, 1], names, ls, save_loc, 0, "KL", f"Ob {0} to Ob KL Divergence vs. Time", "KL2.pdf")
+    plot.plotMetrics(x, metrics["KL"][0, 1:, :, 2], names, ls, save_loc, 0, "KL", f"Ob {0} to Ob Avg KL Divergence vs. Time", "KL.pdf")
+    plot.plotMetrics(x, metrics["JS"][0, 1:], names, ls, save_loc, 0, "JS", f"Ob {0} to Ob Jensen-Shannon Divergence vs. Time", "JS.pdf")
+    plot.plotMetricsPerState(x, metrics["JS_marginal"][0, 1:, :, :], norm_quantities, names, ls, save_loc, 0, "JS Slice", "JS Slice vs. Time", "JSSLice")
     
     success = True
     return success, None, None, None
@@ -1257,13 +1288,12 @@ def worker(MC_idx):
 
 if __name__ == '__main__':
     # TODO: Save success list
-    start_time = time.time()
+    start_time = timer.time()
     W = 2
-    MC_indices = [10, 16, 39]#range(30, 45)
-    # [0, 1, 7, 9, 11, 17, 18, 21, 22, 24, 25, 28]
-    #test = main(MC_indices[0])
-    test = main(MC_indices[1])
-    test = main(MC_indices[2])
+    MC_indices = range(1)
+    #MC_indices = 
+    test = main(MC_indices[0])
+    #test = main(MC_indices[1])
     #test = main(MC_indices[3])
     '''
     successes = []
@@ -1276,6 +1306,9 @@ if __name__ == '__main__':
                 fail_ob_cloud_ts.append([i, ob, cloud, ts])
                 
     success_rate = len(successes) / len(MC_indices)
-    '''
-    end_time = time.time()
+    save_loc = Path("D:/PythonProjects/EDP/PGM/ParticleFusionTest/12_15_25_meeting/Matlab2Python/Test17")
+    with open(save_loc / "successes.json", 'w') as f:
+        json.dump(successes, f)
+    '''  
+    end_time = timer.time()
     print(f"Time elapsed: {end_time - start_time:.1f}")

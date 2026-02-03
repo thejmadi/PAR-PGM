@@ -1,5 +1,5 @@
 clear all; close all;
-save_loc = "D:/PythonProjects/EDP/PGM/ParticleFusionTest/12_15_25_meeting/Matlab2Python/Test9/OrbitData/Agent3a";
+save_loc = "C:/Users/tarun/Downloads/Mod_IODOD (1)/Mod_IODOD";
 %save_loc = "D:/PythonProjects/EDP/PGM_Git/PAR-PGM";
 dynamics = "CR3BP"; % 2Body or CR3BP
 % Observer locations
@@ -49,8 +49,8 @@ end
 % Define time span
 %}
 tstamp1 = 0; % For long term trajectories 
-end_t = 80;
-tspan = tstamp1/normalization_quantities.time2hr:(2/normalization_quantities.time2hr):end_t/normalization_quantities.time2hr; % For our modified trajectory 
+end_t = 20;
+tspan = tstamp1/normalization_quantities.time2hr:(.4/normalization_quantities.time2hr):end_t/normalization_quantities.time2hr; % For our modified trajectory 
 
 %opts = odeset('Events', @termSat);
 % [t,dx_dt] = ode45(@cr3bp_dyn, tspan, x0, opts); % Assumes termination event (i.e. target enters LEO)
@@ -276,7 +276,7 @@ for i = 1:length(obj_topo_pos(:,1))
     EL(i,1) = pi/2 - acos(obj_topo_pos(i,3)/Rho(i,1));
 end
     %if (norm(cross(rot_topo(i,:), rom_topo(i,:)))/norm(rot_topo(i,:)) > Rm && ...
-time_mask = (t*normalization_quantities.time2hr >= 0 & t*normalization_quantities.time2hr <= 80) | (t*normalization_quantities.time2hr > 200);
+time_mask = (t*normalization_quantities.time2hr >= 0 & t*normalization_quantities.time2hr <= 20) | (t*normalization_quantities.time2hr > 200);
 full_ts = [t(time_mask), Rho(time_mask), AZ(time_mask), EL(time_mask)]; % Full augmented time-series vector
 elev_mask = EL >= -100000;
 mask = time_mask & elev_mask;
@@ -377,14 +377,14 @@ ylabel('Elevation Angle (rad)')
 title('Observer Elevation Angle Measurements (Ideal)')
 saveas(gcf, save_loc + "/observations_ECI.png", 'png');
 partial_ts = partial_ts_ECI;
-save(save_loc + '/partial_ts.mat', 'partial_ts');
+save(save_loc + '/partial_ts0.mat', 'partial_ts');
 
 full_ts = [t, obj_topo_pos];
-save(save_loc + '/full_ts.mat', "full_ts");
+save(save_loc + '/full_ts0.mat', "full_ts");
 
 % Construct and save a similar data file for velocity data
 full_vts = [t, obj_topo_vel];
-save(save_loc + '/full_vts.mat', 'full_vts')
+save(save_loc + '/full_vts0.mat', 'full_vts')
 
 save(save_loc + '/normalization_quantities.mat', 'normalization_quantities')
 

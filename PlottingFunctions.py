@@ -119,15 +119,15 @@ def plotMetrics(x, y_data, cloud_names, linestyle, save_loc, ob, y_label, title_
 
 
 
-def plotMetricsPerState(x, y_data, normalization_quantities, cloud_names, linestyle, save_loc, ob, y_label, title_str, filename):
+def plotMetricsPerState(x, y_data, norm_quantities, cloud_names, linestyle, save_loc, ob, y_label, title_str, filename):
     fig, axs = plt.subplots(2, 3, sharex=True, figsize=(12, 6))
     axs = axs.flatten()
     fig.set_visible(True)
     axes_titles = ["X", "Y", "Z", "Xdot", "Ydot", "Zdot"]
     
     if "RMSE" in y_label:
-        y_data[:, :, :3] *= normalization_quantities["dist2km"]
-        y_data[:, :, 3:] *= normalization_quantities["vel2kms"]
+        y_data[:, :, :3] *= norm_quantities["dist2km"]
+        y_data[:, :, 3:] *= norm_quantities["vel2kms"]
     
     for i in range(6):
         for cloud, color, ls in zip(y_data[:, :, i], COLORS, linestyle):
@@ -143,9 +143,9 @@ def plotMetricsPerState(x, y_data, normalization_quantities, cloud_names, linest
 
 
 
-def plotStateSpace(cloud, truth, K, cluster_idx, normalization_quantities, plot_title, filename, plot_cross_observers=False, cloud_names=None):
-    dist2km = normalization_quantities["dist2km"]
-    vel2kms = normalization_quantities["vel2kms"]
+def plotStateSpace(cloud, truth, K, cluster_idx, norm_quantities, plot_title, filename, plot_cross_observers=False, cloud_names=None):
+    dist2km = norm_quantities["dist2km"]
+    vel2kms = norm_quantities["vel2kms"]
     fig, axs = create_hidden_figure()
     
     # Prepare clouds per cluster
@@ -168,9 +168,9 @@ def plotStateSpace(cloud, truth, K, cluster_idx, normalization_quantities, plot_
 
 
 
-def plotStateSpaceCombined(plotting_clouds, plotting_truth, active_cloud_mask, normalization_quantities, cloud_names, plot_title, filename):
-    dist2km = normalization_quantities["dist2km"]
-    vel2kms = normalization_quantities["vel2kms"]
+def plotStateSpaceCombined(plotting_clouds, plotting_truth, active_cloud_mask, norm_quantities, cloud_names, plot_title, filename):
+    dist2km = norm_quantities["dist2km"]
+    vel2kms = norm_quantities["vel2kms"]
     fig, axs = create_hidden_figure()
     
     clouds = [plotting_clouds[i] for i in active_cloud_mask]

@@ -1,11 +1,12 @@
 % Start the clock
 clear all;
 tic%20, 23
-for mc_idx = 11:20
+for mc_idx = 2:2
     clearvars -except mc_idx; close all;
     rng(mc_idx, "twister")
-    save_loc = "D:/PythonProjects/EDP/PGM/ParticleFusionTest/12_15_25_meeting/EXP_L2/EXP_VaryIODandFusionTime/Test1/MC_" + num2str(mc_idx);
-    load_loc = "D:/PythonProjects/EDP/PGM/ParticleFusionTest/12_15_25_meeting/EXP_L2/EXP_VaryIODandFusionTime/Test1/OrbitData/Agent";
+    save_loc = "D:/PythonProjects/EDP/PGM/ParticleFusionTest/12_15_25_meeting/Matlab2Python/Test13/matMC3_" + num2str(mc_idx);
+    save_loc2 = "D:/PythonProjects/EDP/PGM/ParticleFusionTest/12_15_25_meeting/Matlab2Python/Test11";
+    load_loc = "C:/Users/tarun/Downloads/Mod_IODOD (1)/Mod_IODOD"; %"D:/PythonProjects/EDP/PGM/ParticleFusionTest/12_15_25_meeting/Matlab2Python/Test8/OrbitData/Agent";
     dynamics = "CR3BP";
     % Non-dimensionalization
     if dynamics == "CR3BP"
@@ -24,9 +25,9 @@ for mc_idx = 11:20
     end
 
     cluster_by = "FullState";
-    Kn = 14; % Number of clusters (original)
+    Kn = 6; % Number of clusters (original)
     K = repmat({Kn}, 6, 6); % Number of clusters (changeable)
-    Kmax = 14; % Maximum number of clusters (Kmax = 1 for EnKF)
+    Kmax = 6; % Maximum number of clusters (Kmax = 1 for EnKF)
     colors = ["#E69F00","#56B4E9","#009E73","#F0E442","#0072B2","#D55E00","#CC79A7","#000000","#999999","#117733","#88CCEE","#332288","#DDCC77","#AA4499","#44AA99", ...
         "#882255","#1B9E77","#D95F02","#7570B3","#E7298A","#66A61E","#E6AB02","#A6761D","#666666","#A6CEE3","#1F78B4","#B2DF8A","#33A02C","#FB9A99","#E31A1C","#FDBF6F", ...
         "#FF7F00","#CAB2D6","#6A3D9A","#FFFF99","#8DD3C7","#FFFFB3","#BEBADA","#FB8072","#80B1D3","#FDB462","#B3DE69","#FCCDE5","#D9D9D9","#BC80BD","#CCEBC5","#FFED6F", ...
@@ -36,19 +37,19 @@ for mc_idx = 11:20
     
     disp_diagnostics = true;
     plot_IOD = false;
-    plot_indv_clouds = false;
+    plot_indv_clouds = true;
     plot_cross_observers = true;
     save_MC_metrics = true;
     
     % Number of particles to use in IOD
-    num_IOD_particles = 20000;
-    Lp = [20000; 20000; 20000];
+    num_IOD_particles = 5000;
+    Lp = [5000; 5000];
     % Num of observers
-    total_num_agents = 3;
+    total_num_agents = 2;
     num_agents = 0;
     agent_is_active = false(total_num_agents, 1);
     active_mask = [];
-    num_msmt_for_IOD = [10; 10; 10];
+    num_msmt_for_IOD = [8; 10];
     ts_to_perform_IOD = [1; 21; 1];
     plot_comb_clouds = [true; false; false; false];
     num_clouds_per_agent = ones(total_num_agents, 1);
@@ -60,20 +61,23 @@ for mc_idx = 11:20
     full_ts = cell(1, total_num_agents);
     full_vts = cell(1, total_num_agents);
     for ob = 1:total_num_agents
-        partial_ts{ob} = load(load_loc + num2str(ob) + "/partial_ts.mat").partial_ts; % Noiseless observation data
-        full_ts{ob} = load(load_loc + num2str(ob) + "/full_ts.mat").full_ts; % Position truth (topocentric frame)
-        full_vts{ob} = load(load_loc + num2str(ob) + "/full_vts.mat").full_vts; % Velocity truth (topocentric frame)
+        %partial_ts{ob} = load(load_loc + num2str(ob) + "/partial_ts.mat").partial_ts; % Noiseless observation data
+        %full_ts{ob} = load(load_loc + num2str(ob) + "/full_ts.mat").full_ts; % Position truth (topocentric frame)
+        %full_vts{ob} = load(load_loc + num2str(ob) + "/full_vts.mat").full_vts; % Velocity truth (topocentric frame)
+        partial_ts{ob} = load(load_loc + "/partial_ts4.mat").partial_ts; % Noiseless observation data
+        full_ts{ob} = load(load_loc + "/full_ts4.mat").full_ts; % Position truth (topocentric frame)
+        full_vts{ob} = load(load_loc + "/full_vts4.mat").full_vts; % Velocity truth (topocentric frame)
     end
     [combined_msmt_data, combined_state_data, all_timesteps] = combineMsmts(full_ts, full_vts, partial_ts);
     num_timesteps = size(all_timesteps, 1);
 
     %fusion_information = [1, 2, false, 80];
     fusion_information = [1, 2, true, 46;
-                        1, 2, true, 56;
-                        1, 2, true, 66;
-                        1, 2, true, 76];
+                        1, 2, false, 56;
+                        1, 2, false, 66;
+                        1, 2, false, 76];
     cloud_names = "Original Obs: " + (1:max(1, total_num_agents-1))' + ". IOD: " + string(normalization_quantities.time2hr * all_timesteps(ts_to_perform_IOD(1:end-1))) + " hrs";
-    cloud_names(end+1) = "Baseline Obs";
+    %cloud_names(end+1) = "Baseline Obs";
     fusion_types = ["Original", "Weight Update"];
     num_new_clouds_per_agent = 1;
 
@@ -100,11 +104,11 @@ for mc_idx = 11:20
     % Note: All above quantities are drawn in a zero-mean Gaussian fashion.
     h = @(x) [atan2(x(2),x(1)); pi/2 - acos(x(3)/sqrt(x(1)^2 + x(2)^2 + x(3)^2))]; % Nonlinear measurement model
     theta_f = 1.5; % Arc-seconds of error covariance
-    R_f = repmat({0.25}, 1, 6); % Range percentage error covariance
+    R_f = repmat({0.05}, 1, 6); % Range percentage error covariance
     %R_f{2} = 0.25;
     
     % Limits of the cislunar domain
-    enforce_bounds = false;
+    enforce_bounds = true;
     if dynamics == "CR3BP"
         low_lim = (2*42164); % Two times the GEO Distance
         up_lim = 550000;
@@ -127,6 +131,7 @@ for mc_idx = 11:20
     cross_ob_ent = repmat({NaN(num_timesteps, 1)}, total_num_agents, 1);
     %cross_ob_unnorm_ent = repmat({NaN(num_timesteps, 1)}, total_num_agents-1, 1);
     cross_ob_norm = repmat({NaN(num_timesteps, 1)}, total_num_agents, 1);
+    KL = repmat({NaN(num_timesteps, 1)}, total_num_agents, 1);
     NEES = repmat({NaN(num_timesteps, 1)}, total_num_agents, total_num_clouds);
     RMSE = repmat({NaN(num_timesteps, 6)}, total_num_agents, total_num_clouds);
     std_dev = repmat({NaN(num_timesteps, 6)}, total_num_agents, total_num_clouds);
@@ -146,7 +151,7 @@ for mc_idx = 11:20
     Xm_cloud = cell(total_num_agents, total_num_clouds);
     Xp_cloud = cell(total_num_agents, total_num_clouds);
     Xp_cloudp = cell(total_num_agents, total_num_clouds);
-    for ts = 1:num_timesteps-1
+    for ts = 1:24%num_timesteps-1
         t_prev = all_timesteps(ts);
         %plot_indv_clouds = false;
         %% IOD
@@ -158,18 +163,13 @@ for mc_idx = 11:20
                 for i = 1:num_IOD_particles
                     X0cloud_temp(i,:) = stateEstCloud(num_msmt_for_IOD(ob), ts, nfit, theta_f, R_f{ob}, combined_msmt_data(:, :, ob), low_lim, up_lim, normalization_quantities);
                 end
+                %save(save_loc2 + '/X0cloud_temp.mat', 'X0cloud_temp')
                 %theta_f = 0;
                 % TODO: Check whether X0cloud clears correctly
                 if (enforce_bounds)
                     X0cloud = enforceCislunarBounds(X0cloud_temp, t_prev, obs_lat{ob}, obs_lon{ob}, normalization_quantities, low_lim, up_lim, vel_lim);
                 else
                     X0cloud = X0cloud_temp;
-                end
-                if (ob == 2)
-                    ob;
-                    %up_lim = 3000000;
-                    %combined_msmt_data(:, 2, ob) = false;
-                %    X0cloud = Xp_cloudp{1, 1};%enforceCislunarBounds(X0cloud_temp, t_prev, obs_lat{ob}, obs_lon{ob}, dist2km, vel2kms, low_lim, up_lim, vel_lim);%X0cloud(1:j,:);
                 end
                 Xprop_truth{ob} = combined_state_data(ts, 2:end, ob);
                 plotStateSpace(X0cloud, ...
@@ -195,29 +195,28 @@ for mc_idx = 11:20
                 agent_is_active(ob) = true;
                 active_mask = sort([active_mask, ob]);
                 num_agents = num_agents + 1;
+                
                 metric_cloud = Topo2Synodic(X0cloud, t_prev, obs_lat{ob}, obs_lon{ob});
                 metric_truth = Topo2Synodic(combined_state_data(ts, 2:end, ob), t_prev, obs_lat{ob}, obs_lon{ob});
-                [likelihood_metric_state_space{ob, 1}(ts), best_ent2_det_cov{ob, 1}(ts), ent2_det_cov{ob, 1}(ts), NEES{ob, 1}(ts), RMSE{ob, 1}(ts, :), std_dev{ob, 1}(ts, :), MC_std_dev{ob, 1}(ts), mat_weight_metric{ob, 1}(ts, :), MC_consistency{ob, 1}(ts), num_cluster{ob, 1}(ts), num_particles{ob, 1}(ts)] = getStateSpaceMetrics(K{ob, 1}, metric_cloud, metric_truth, cluster_by);
+                [likelihood_metric_state_space{ob, 1}(ts), best_ent2_det_cov{ob, 1}(ts), ent2_det_cov{ob, 1}(ts), NEES{ob, 1}(ts), RMSE{ob, 1}(ts, :), std_dev{ob, 1}(ts, :), MC_std_dev{ob, 1}(ts), mat_weight_metric{ob, 1}(ts, :), MC_consistency{ob, 1}(ts), num_cluster{ob, 1}(ts), num_particles{ob, 1}(ts)] = getStateSpaceMetrics(K{ob, 1}, metric_cloud, metric_truth, cluster_by, ts, save_loc2);
                 [likelihood_metric_msmt_space{ob, 1}(ts), best_ent2_det_cov_msmt{ob, 1}(ts), ent2_det_cov_msmt{ob, 1}(ts)] = getMsmtSpaceMetrics(K{ob, 1}, X0cloud, combined_state_data(ts, 2:end, ob), h);
-
+                
                 Xp_cloudp{ob, 1} = X0cloud;
-                if (ob == 2)
-                    %Xp_cloudp{ob, 1} = Xp_cloudp{1, 1};
-                    %theta_f = 0;
-                end
             end
         end
         
         % Calculate Similarity Metrics
+        
         for ob1 = 1:1%numel(active_mask)
             for ob2 = ob1+1:numel(active_mask)
                 ob1_idx = active_mask(ob1);
                 ob2_idx = active_mask(ob2);
                 cross_ent_clouds_1 = Topo2Synodic(Xp_cloudp{ob1_idx, 1}, t_prev, obs_lat{ob1_idx}, obs_lon{ob1_idx});
                 cross_ent_clouds_2 = Topo2Synodic(Xp_cloudp{ob2_idx, 1}, t_prev, obs_lat{ob2_idx}, obs_lon{ob2_idx});
-                [cross_ob_ent{ob2_idx, ob1_idx}(ts), ~, cross_ob_norm{ob2_idx, ob1_idx}(ts)] = crossObEntropy({cross_ent_clouds_1, cross_ent_clouds_2}, cluster_by, 8, 2);
+                [cross_ob_ent{ob2_idx, ob1_idx}(ts), ~, cross_ob_norm{ob2_idx, ob1_idx}(ts), KL{ob2_idx, ob1_idx}(ts)] = crossObEntropy({cross_ent_clouds_1, cross_ent_clouds_2}, cluster_by, 8, 2);
             end
         end
+        
         if (sum(agent_is_active) >= 2) % If 2 or more agents have completed IOD
             for fuse_num = 1:size(fusion_information, 1)
                 if (agent_is_active(fusion_information(fuse_num, 1)) == true && agent_is_active(fusion_information(fuse_num, 2)) == true && ...
@@ -316,21 +315,23 @@ for mc_idx = 11:20
                 ent1{ob, cloud}(ts,:) = getDiagCov(Xp_cloudp{ob, cloud});
             
                 % Propagation Step
+                %if(ts == 14)
+                %    load(save_loc2 + '/cloud_for_matlab_' + num2str(ts) + '.mat')
+                %    Xp_cloudp{ob, cloud} = Xp_cloudp_temp;
+                %end
                 Xm_cloud_tmp = propagate(Xp_cloudp{ob, cloud}, t_prev, interval, obs_lat{ob}, obs_lon{ob}, normalization_quantities, dynamics);
                 if (enforce_bounds)
                     Xm_cloud{ob, cloud} = enforceCislunarBounds(Xm_cloud_tmp, t_prior, obs_lat{ob}, obs_lon{ob}, normalization_quantities, low_lim, up_lim, vel_lim);
                 else
                     Xm_cloud{ob, cloud} = Xm_cloud_tmp;
                 end
+                %save(save_loc2 + '/propagate' + num2str(ts) + '.mat', 'Xm_cloud_tmp')
                 %end
             end
             Xprop_truth{ob} = propagate(Xprop_truth{ob}, t_prev, interval, obs_lat{ob}, obs_lon{ob}, normalization_quantities, dynamics);
         end
         fprintf("Timestamp: %1.5f\n", t_prior*normalization_quantities.time2hr);
-        
-        if (t_prior*normalization_quantities.time2hr >= 20)
-            t_prior;
-        end
+
         %% Update Step
         %cPoints = cell(num_agents, num_clouds_per_agent, Kmax);
         %mu_c = cell(num_agents, num_clouds_per_agent, Kmax);    mu_p = cell(total_num_agents, total_num_clouds, Kmax);
@@ -354,7 +355,7 @@ for mc_idx = 11:20
                 
                 %idx = cell(total_num_agents, num_clouds_per_agent(ob));
                 for cloud = 1:num_clouds_per_agent(ob)
-                    [idx{ob, cloud}, K{ob, cloud}, ~] = cluster(Xm_cloud{ob, cloud}, cluster_by, K{ob, cloud});
+                    [idx{ob, cloud}, K{ob, cloud}, ~] = cluster(Xm_cloud{ob, cloud}, cluster_by, K{ob, cloud}, ts+1, save_loc2);
                 end
                 if (ob == 2)
                     %idx{2, 1} = idx{1, 1};
@@ -387,14 +388,18 @@ for mc_idx = 11:20
                     for i = 1:Lp(ob)
                         [Xp_cloudp_temp(i,:), c_id_temp(i)] = drawFrom(wp{1, cloud}, mu_p(ob, cloud, :), P_p(ob, cloud, :)); 
                     end
+                    %save(save_loc2 + '/drawFrom' + num2str(ts+1) + '.mat', 'Xp_cloudp_temp')
+                    %save(save_loc2 + '/drawFromIdx' + num2str(ts+1) + '.mat', 'c_id_temp')
                     Xp_cloudp{ob, cloud} = Xp_cloudp_temp;
                     c_id{ob, cloud} = c_id_temp;
 
                     %% Metric Calculations
+                    
                     metric_cloud = Topo2Synodic(Xp_cloudp{ob, cloud}, t_prior, obs_lat{ob}, obs_lon{ob});
                     metric_truth = Topo2Synodic(Xprop_truth{ob}, t_prior, obs_lat{ob}, obs_lon{ob});
-                    [likelihood_metric_state_space{ob, cloud}(ts+1), best_ent2_det_cov{ob, cloud}(ts+1), ent2_det_cov{ob, cloud}(ts+1), NEES{ob, cloud}(ts+1), RMSE{ob, cloud}(ts+1, :), std_dev{ob, cloud}(ts+1, :), MC_std_dev{ob, cloud}(ts+1), mat_weight_metric{ob, cloud}(ts+1, :), MC_consistency{ob, cloud}(ts+1), num_cluster{ob, cloud}(ts+1), num_particles{ob, cloud}(ts+1)] = getStateSpaceMetrics(K{ob, cloud}, metric_cloud, metric_truth, cluster_by);
+                    [likelihood_metric_state_space{ob, cloud}(ts+1), best_ent2_det_cov{ob, cloud}(ts+1), ent2_det_cov{ob, cloud}(ts+1), NEES{ob, cloud}(ts+1), RMSE{ob, cloud}(ts+1, :), std_dev{ob, cloud}(ts+1, :), MC_std_dev{ob, cloud}(ts+1), mat_weight_metric{ob, cloud}(ts+1, :), MC_consistency{ob, cloud}(ts+1), num_cluster{ob, cloud}(ts+1), num_particles{ob, cloud}(ts+1)] = getStateSpaceMetrics(K{ob, cloud}, metric_cloud, metric_truth, cluster_by, ts+1, save_loc2);
                     [likelihood_metric_msmt_space{ob, cloud}(ts+1), best_ent2_det_cov_msmt{ob, cloud}(ts+1), ent2_det_cov_msmt{ob, cloud}(ts+1)] = getMsmtSpaceMetrics(K{ob, cloud}, Xp_cloudp{ob, cloud}, Xprop_truth{ob}, h);
+                    
                 end
 
             else
@@ -420,10 +425,12 @@ for mc_idx = 11:20
                     Xp_cloudp{ob, cloud} = Xm_cloud{ob, cloud}; c_id{ob, cloud} = ones(size(Xp_cloudp{ob, cloud}, 1), 1);
 
                     %% Metric Calculations
+                    
                     metric_cloud = Topo2Synodic(Xp_cloudp{ob, cloud}, t_prior, obs_lat{ob}, obs_lon{ob});
                     metric_truth = Topo2Synodic(Xprop_truth{ob}, t_prior, obs_lat{ob}, obs_lon{ob});
-                    [likelihood_metric_state_space{ob, cloud}(ts+1), best_ent2_det_cov{ob, cloud}(ts+1), ent2_det_cov{ob, cloud}(ts+1), NEES{ob, cloud}(ts+1), RMSE{ob, cloud}(ts+1, :), std_dev{ob, cloud}(ts+1, :), MC_std_dev{ob, cloud}(ts+1), mat_weight_metric{ob, cloud}(ts+1, :), MC_consistency{ob, cloud}(ts+1), num_cluster{ob, cloud}(ts+1), num_particles{ob, cloud}(ts+1)] = getStateSpaceMetrics(Kmax, metric_cloud, metric_truth, cluster_by);
+                    [likelihood_metric_state_space{ob, cloud}(ts+1), best_ent2_det_cov{ob, cloud}(ts+1), ent2_det_cov{ob, cloud}(ts+1), NEES{ob, cloud}(ts+1), RMSE{ob, cloud}(ts+1, :), std_dev{ob, cloud}(ts+1, :), MC_std_dev{ob, cloud}(ts+1), mat_weight_metric{ob, cloud}(ts+1, :), MC_consistency{ob, cloud}(ts+1), num_cluster{ob, cloud}(ts+1), num_particles{ob, cloud}(ts+1)] = getStateSpaceMetrics(Kmax, metric_cloud, metric_truth, cluster_by, ts+1, save_loc2);
                     [likelihood_metric_msmt_space{ob, cloud}(ts+1), best_ent2_det_cov_msmt{ob, cloud}(ts+1), ent2_det_cov_msmt{ob, cloud}(ts+1)] = getMsmtSpaceMetrics(K{ob, cloud}, Xp_cloudp{ob, cloud}, Xprop_truth{ob}, h);
+                    
                 end
             end
         end
@@ -826,6 +833,10 @@ for mc_idx = 11:20
     %fig_num = fig_num + 1;
     plotMetrics(fig_num, 0:num_timesteps-1, cross_ob_norm(2:end, 1), cloud_names, colors, save_loc, 1, 'L1 Norm', 'Ob-Ob Unnormalized Likelihood Matrix L1 Norm', 'ObObNorm.png');
     fig_num = fig_num + 1;
+    plotMetrics(fig_num, 0:num_timesteps-1, KL(2:end, 1), cloud_names, colors, save_loc, 1, 'KL', 'Ob-Ob KL', 'KL.png');
+    fig_num = fig_num + 1;
+    plotMetrics(fig_num, 0:num_timesteps-1, KL(2:end, 1), cloud_names, colors, save_loc, 1, 'LogKL', 'Ob-Ob KL', 'LogKL.png');
+    fig_num = fig_num + 1;
 
     for ob = 1:total_num_agents
         x = 0:num_timesteps-1;
@@ -1075,7 +1086,6 @@ for mc_idx = 11:20
             % savefig(gcf, 'nextObservedTracklet_normK.fig');
             %}
             
-            %%save("./Outside2/stdevs.mat", "ent1");
         end
     end
     
@@ -1680,7 +1690,7 @@ function plotMetrics(fig_num, x, y_data, cloud_names, colors, save_loc, ob, y_la
         title('NEES Ob: %i', ob)
         legend([cloud_names, "NEES 95% CI"], 'Location', 'best')
     end
-    if (strcmp(y_label, 'NEES') || strcmp(y_label, 'RMSE'))
+    if (strcmp(y_label, 'NEES') || strcmp(y_label, 'RMSE') || strcmp(y_label, 'LogKL'))
         set(gca, 'YScale', 'log');
     end
 
@@ -2061,7 +2071,7 @@ end
 %% Metric Functions
 
 
-function [ob_ob_entropy, ob_ob_unnorm_entropy, ob_ob_l1_norm] = crossObEntropy(Xcloud, cluster_by, Kp, num_agents)
+function [ob_ob_entropy, ob_ob_unnorm_entropy, ob_ob_l1_norm, KL] = crossObEntropy(Xcloud, cluster_by, Kp, num_agents)
     Kp = 10;
     gmm_unnorm = cell(1, num_agents);
     K = cell(1, num_agents);
@@ -2124,16 +2134,17 @@ function [ob_ob_entropy, ob_ob_unnorm_entropy, ob_ob_l1_norm] = crossObEntropy(X
     
     P = likeli / sum(likeli(:));
     P_nonzero = P(P > 0);
-    ob_ob_entropy = -sum(P_nonzero .* log10(P_nonzero));
+    ob_ob_entropy = -sum(P_nonzero .* log(P_nonzero));
     likeli_nonzero = likeli(likeli > 0);
-    ob_ob_unnorm_entropy = -sum(likeli_nonzero .* log10(likeli_nonzero));
+    ob_ob_unnorm_entropy = -sum(likeli_nonzero .* log(likeli_nonzero));
     %P_weight = likeli_weight / sum(likeli_weight(:));
     %P_weight_nonzero = P_weight(P_weight > 0);
-    ob_ob_l1_norm = log10(sum(abs(likeli), 'all'));
+    ob_ob_l1_norm = log(sum(abs(likeli), 'all'));
+    KL = -0.5*mean(log(gmm_unnorm{1}.pdf(Xcloud{2})) + log(gmm_unnorm{2}.pdf(Xcloud{1})));
 end
 
 
-function [truth_likelihood, best_mode_entropy, cloud_entropy, NEES, RMSE, std_dev, MC_std_dev, weights, MC_consistency, Kp, Lp] = getStateSpaceMetrics(Kp, Xcloud, Xtruth, cluster_by)
+function [truth_likelihood, best_mode_entropy, cloud_entropy, NEES, RMSE, std_dev, MC_std_dev, weights, MC_consistency, Kp, Lp] = getStateSpaceMetrics(Kp, Xcloud, Xtruth, cluster_by, ts, save_loc2)
     Kp = 10;
     if(cluster_by == "Range")
         msmt_cloud = zeros(length(Xcloud), 1);
@@ -2185,7 +2196,7 @@ function [truth_likelihood, best_mode_entropy, cloud_entropy, NEES, RMSE, std_de
         norm_vc = (vc - mean_vc)./std_vc; % Normalizing the velocity
         Xm_norm = [norm_vc];
     end
-
+    %{
     [idx, Kp, ~] = cluster(Xcloud, cluster_by, Kp);
     cPoints = cell(Kp,1); P = cell(Kp,1);
     w = zeros(Kp,1);
@@ -2201,10 +2212,15 @@ function [truth_likelihood, best_mode_entropy, cloud_entropy, NEES, RMSE, std_de
         end
         w(k) = size(cluster_points, 1) / size(Xcloud, 1); % Vector of weights
     end
-    
+    %}
     Lp = length(Xcloud(:,1));
+    
     %Kp
     [gmm_norm, Kp] = matlabGMM(Kp, Xm_norm);
+    norm_weights = gmm_norm.ComponentProportion;   % 1 x K
+    norm_means   = gmm_norm.mu;                    % K x D
+    norm_covs    = gmm_norm.Sigma;                 % D x D x K (for full)
+    %save(save_loc2 + '/norm_gmm_params_' + num2str(ts) + '.mat', 'norm_weights', 'norm_means', 'norm_covs');
     %Kp
     %gmm_norm = fitgmdist(Xm_norm, Kp, 'Start', initialize_fitgmm, 'CovarianceType', 'full', 'RegularizationValue', 1e-6, 'Options', statset('MaxIter',500, 'Display','off'));
     
@@ -2216,7 +2232,10 @@ function [truth_likelihood, best_mode_entropy, cloud_entropy, NEES, RMSE, std_de
         covariances_unnorm(:,:, k) = diag_std * gmm_norm.Sigma(:,:,k) * diag_std';
     end
     gmm_unnorm = gmdistribution(means_unnorm, covariances_unnorm, gmm_norm.ComponentProportion);
-    
+    unnorm_weights = gmm_unnorm.ComponentProportion;   % 1 x K
+    unnorm_means   = gmm_unnorm.mu;                    % K x D
+    unnorm_covs    = gmm_unnorm.Sigma;                 % D x D x K (for full)
+    %save(save_loc2 + '/unnorm_gmm_params_' + num2str(ts) + '.mat', 'unnorm_weights', 'unnorm_means', 'unnorm_covs');
     % Calc various metrics
     component_likelihoods = posterior(gmm_unnorm, Xtruth);
     [~, best_mode] = max(component_likelihoods);
@@ -2225,7 +2244,7 @@ function [truth_likelihood, best_mode_entropy, cloud_entropy, NEES, RMSE, std_de
     %best_weight = gmm_unnorm.ComponentProportion(best_mode);
     best_samples = mvnrnd(best_mu, best_cov, 10000);
 
-    truth_likelihood = log10(mvnpdf(Xtruth, best_mu, best_cov));
+    truth_likelihood = log(mvnpdf(Xtruth, best_mu, best_cov));
 
     diff = Xtruth - best_mu;
     NEES = gmm_unnorm.ComponentProportion(best_mode)* (diff * (best_cov \ diff'));  % Mahalanobis distance
@@ -2234,13 +2253,15 @@ function [truth_likelihood, best_mode_entropy, cloud_entropy, NEES, RMSE, std_de
     std_dev = sqrt(diag(best_cov));
     
     best_particle_likelihood = mvnpdf(best_samples, best_mu, best_cov);
-    best_mode_entropy = -mean(log10(best_particle_likelihood));%log(gmm_unnorm.ComponentProportion(best_mode)*det(best_cov));
+    best_mode_entropy = -mean(log(best_particle_likelihood));%log(gmm_unnorm.ComponentProportion(best_mode)*det(best_cov));
     %ent_det_cov = 0;
     for k = 1:Kp
         %ent_det_cov = ent_det_cov + gmm_unnorm.ComponentProportion(k)*det(gmm_unnorm.Sigma(:, :, k));
     end
+    cloud_truth_likelihood = log(pdf(gmm_unnorm, Xtruth));
     particle_likelihood = pdf(gmm_unnorm, Xcloud);
-    cloud_entropy = -mean(log10(particle_likelihood + 1e-300));
+    cloud_entropy = -mean(log(particle_likelihood + 1e-300));
+    cloud_RMSE = sqrt(mean((Xcloud - Xtruth).^2, 1));
 
     weights = [min(gmm_unnorm.ComponentProportion), mean(gmm_unnorm.ComponentProportion), max(gmm_unnorm.ComponentProportion)];
 
@@ -2299,17 +2320,17 @@ function [truth_likelihood, best_mode_entropy, cloud_entropy] = getMsmtSpaceMetr
     best_samples = mvnrnd(best_mu, best_cov, 10000);
     
     best_particle_likelihood = mvnpdf(best_samples, best_mu, best_cov);
-    best_mode_entropy = -mean(log10(best_particle_likelihood));
+    best_mode_entropy = -mean(log(best_particle_likelihood));
     %best_ent_det_cov = log(gmm_unnorm.ComponentProportion(best_mode)*det(best_cov));
     %ent_det_cov = 0;
     %for k = 1:Kp
     %    ent_det_cov = ent_det_cov + gmm_unnorm.ComponentProportion(k)*det(gmm_unnorm.Sigma(:, :, k));
     %end
     particle_likelihood = pdf(gmm_unnorm, msmt_cloud);
-    cloud_entropy = -mean(log10(particle_likelihood + 1e-300));
+    cloud_entropy = -mean(log(particle_likelihood + 1e-300));
     %ent_det_cov = log(ent_det_cov);
 
-    truth_likelihood = log10(mvnpdf(Xmsmt', best_mu, best_cov));
+    truth_likelihood = log(mvnpdf(Xmsmt', best_mu, best_cov));
 end
 
 
@@ -2320,7 +2341,7 @@ end
 
 %% GMM Functions
 
-function [idx, K, C] = cluster(data, cluster_by, K)
+function [idx, K, C] = cluster(data, cluster_by, K, ts, save_loc2)
     if(cluster_by == "Range")
         msmt_cloud = zeros(length(data), 1);
         h = @(x) [sqrt(x(1)^2 + x(2)^2 + x(3)^2)]; % Nonlinear measurement model
@@ -2379,6 +2400,7 @@ function [idx, K, C] = cluster(data, cluster_by, K)
         [idx, C] = kmeans(Xm_norm, K, 'MaxIter', 150, 'Replicates', 2);
         num_times_clustered = num_times_clustered + 1;
     end
+    %save(save_loc2 + '/cluster_func_idx' + num2str(ts) + '.mat', 'idx')
 end
 
 
@@ -2411,7 +2433,7 @@ end
 
 
 function [optimal_gmm, optimal_K] = matlabGMM(Kp, Xcloud)
-    delta = 4;  % how far to search on either side of Kp
+    delta = 0;  % how far to search on either side of Kp
     K_range = max(1, Kp - delta) : (Kp + delta);  % ensure at least 1 component
 
     num_K = numel(K_range);

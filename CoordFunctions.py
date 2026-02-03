@@ -10,17 +10,17 @@ import datetime as dt
 import pymap3d
 
 # Used to get the location of the Earth-Observer vector at a certain time (t_stamp)
-def getObserverPos(t_stamp, obs_lat, obs_lon, obs_el, normalization_quantities):
+def getObserverPos(t_stamp, obs_lat, obs_lon, obs_el, norm_quantities):
     # Insert code for obtaining vector between center of Earth and observer
     UTC_vec_orig = dt.datetime(2024, 5, 3, 2, 41, 15, tzinfo=dt.timezone.utc) # Initial UTC vector at t_stamp = 0
-    t_add_dim = t_stamp *  normalization_quantities["time2hr"]/24 # Convert the time to add to a dimensional quantity
+    t_add_dim = t_stamp *  norm_quantities["time2hr"]/24 # Convert the time to add to a dimensional quantity
     UTC_vec = UTC_vec_orig + dt.timedelta(t_add_dim) # You will need this for calculating r_{eo} and v_{eo}
 
     
     reo_dim = pymap3d.geodetic2eci(obs_lat, obs_lon, obs_el, UTC_vec)
     reo_dim = np.asarray(reo_dim).reshape(3)
     reo_nondim = np.zeros(reo_dim.shape)
-    reo_nondim[:] = reo_dim[:]/(1000*normalization_quantities["dist2km"]) # Conversion to non-dimensional units in the ECI frame
+    reo_nondim[:] = reo_dim[:]/(1000*norm_quantities["dist2km"]) # Conversion to non-dimensional units in the ECI frame
     
     # Finally, we convert from the ECI frame to the topographic frame
 
@@ -41,10 +41,10 @@ def getObserverPos(t_stamp, obs_lat, obs_lon, obs_el, normalization_quantities):
     return reo_topo
 
 '''
-def Topo2Synodic(X_ot, t_stamp, obs_lat, obs_lon, obs_el, normalization_quantities):
+def Topo2Synodic(X_ot, t_stamp, obs_lat, obs_lon, obs_el, norm_quantities):
     # First step: Obtain X_{eo}**{ECI} 
     UTC_vec_orig = dt.datetime(2024, 5, 3, 2, 41, 15, tzinfo=dt.timezone.utc) # Initial UTC vector at t_stamp = 0
-    t_add_dim = t_stamp * normalization_quantities["time2hr"]/24 # Convert the time to add to a dimensional quantity
+    t_add_dim = t_stamp * norm_quantities["time2hr"]/24 # Convert the time to add to a dimensional quantity
     UTC_vec = UTC_vec_orig + dt.timedelta(t_add_dim) # You will need this for calculating r_{eo} and v_{eo}
     
 
@@ -59,8 +59,8 @@ def Topo2Synodic(X_ot, t_stamp, obs_lat, obs_lon, obs_el, normalization_quantiti
 
     reo_nondim = np.zeros(reo_dim.shape[0])
     veo_nondim = np.zeros(veo_dim.shape[0])
-    reo_nondim[:] = reo_dim[:]/(1000*normalization_quantities["dist2km"]) # Conversion to non-dimensional units in the ECI frame
-    veo_nondim[:] = veo_dim[:]/(1000*normalization_quantities["vel2kms"]) # Conversion to non-dimensional units in the ECI frame
+    reo_nondim[:] = reo_dim[:]/(1000*norm_quantities["dist2km"]) # Conversion to non-dimensional units in the ECI frame
+    veo_nondim[:] = veo_dim[:]/(1000*norm_quantities["vel2kms"]) # Conversion to non-dimensional units in the ECI frame
 
     z_hat_topo = reo_nondim/la.norm(reo_nondim)
     x_hat_topo = np.cross(z_hat_topo, np.array([0, 0, 1]))/la.norm(np.cross(z_hat_topo, np.array([0, 0, 1])))
@@ -96,7 +96,7 @@ def Topo2Synodic(X_ot, t_stamp, obs_lat, obs_lon, obs_el, normalization_quantiti
         ret_S = la.inv(R3)@ret_ECI
         vet_S = la.inv(R3)@(vet_ECI - dR3_dt@ret_S)
     
-        r_be = np.array([-normalization_quantities["mu"], 0, 0])
+        r_be = np.array([-norm_quantities["mu"], 0, 0])
         v_be = np.array([0, 0, 0])
     
         r_bt = r_be + ret_S # In synodic reference frame
@@ -105,10 +105,10 @@ def Topo2Synodic(X_ot, t_stamp, obs_lat, obs_lon, obs_el, normalization_quantiti
         X_bt[particle, :] = np.hstack((r_bt, v_bt))
     return X_bt
 '''
-def Topo2Synodic(X_ot, t_stamp, obs_lat, obs_lon, obs_el, normalization_quantities):
+def Topo2Synodic(X_ot, t_stamp, obs_lat, obs_lon, obs_el, norm_quantities):
     # First step: Obtain X_{eo}**{ECI} 
     UTC_vec_orig = dt.datetime(2024, 5, 3, 2, 41, 15, tzinfo=dt.timezone.utc) # Initial UTC vector at t_stamp = 0
-    t_add_dim = t_stamp * normalization_quantities["time2hr"]/24 # Convert the time to add to a dimensional quantity
+    t_add_dim = t_stamp * norm_quantities["time2hr"]/24 # Convert the time to add to a dimensional quantity
     UTC_vec = UTC_vec_orig + dt.timedelta(t_add_dim) # You will need this for calculating r_{eo} and v_{eo}
     
 
@@ -123,8 +123,8 @@ def Topo2Synodic(X_ot, t_stamp, obs_lat, obs_lon, obs_el, normalization_quantiti
 
     reo_nondim = np.zeros(reo_dim.shape[0])
     veo_nondim = np.zeros(veo_dim.shape[0])
-    reo_nondim[:] = reo_dim[:]/(1000*normalization_quantities["dist2km"]) # Conversion to non-dimensional units in the ECI frame
-    veo_nondim[:] = veo_dim[:]/(1000*normalization_quantities["vel2kms"]) # Conversion to non-dimensional units in the ECI frame
+    reo_nondim[:] = reo_dim[:]/(1000*norm_quantities["dist2km"]) # Conversion to non-dimensional units in the ECI frame
+    veo_nondim[:] = veo_dim[:]/(1000*norm_quantities["vel2kms"]) # Conversion to non-dimensional units in the ECI frame
 
     z_hat_topo = reo_nondim/la.norm(reo_nondim)
     x_hat_topo = np.cross(z_hat_topo, np.array([0, 0, 1]))/la.norm(np.cross(z_hat_topo, np.array([0, 0, 1])))
@@ -165,7 +165,7 @@ def Topo2Synodic(X_ot, t_stamp, obs_lat, obs_lon, obs_el, normalization_quantiti
     ret_S = ret_ECI @ R3_inv.T
     vet_S = (vet_ECI - ret_S @ dR3_dt.T) @ R3_inv.T
 
-    r_be = np.array([-normalization_quantities["mu"], 0, 0])
+    r_be = np.array([-norm_quantities["mu"], 0, 0])
     v_be = np.array([0, 0, 0])
 
     r_bt = r_be + ret_S # In synodic reference frame
@@ -175,12 +175,12 @@ def Topo2Synodic(X_ot, t_stamp, obs_lat, obs_lon, obs_el, normalization_quantiti
     X_bt = np.hstack((r_bt, v_bt))
     return X_bt
 '''
-def Synodic2Topo(X_bt, t_stamp, obs_lat, obs_lon, obs_el, normalization_quantities):
+def Synodic2Topo(X_bt, t_stamp, obs_lat, obs_lon, obs_el, norm_quantities):
     # Insert code for obtaining vector between center of Earth and observer
-    rbe = np.array([-normalization_quantities["mu"], 0, 0]) # Position vector relating center of earth to barycenter
+    rbe = np.array([-norm_quantities["mu"], 0, 0]) # Position vector relating center of earth to barycenter
 
     UTC_vec_orig = dt.datetime(2024, 5, 3, 2, 41, 15, tzinfo=dt.timezone.utc) # Initial UTC vector at t_stamp = 0
-    t_add_dim = t_stamp * normalization_quantities["time2hr"]/24 # Convert the time to add to a dimensional quantity
+    t_add_dim = t_stamp * norm_quantities["time2hr"]/24 # Convert the time to add to a dimensional quantity
     UTC_vec = UTC_vec_orig + dt.timedelta(t_add_dim) # You will need this for calculating r_{eo} and v_{eo}
 
     delt_add_dim = t_add_dim - 1/86400
@@ -197,8 +197,8 @@ def Synodic2Topo(X_bt, t_stamp, obs_lat, obs_lon, obs_el, normalization_quantiti
 
     reo_nondim = np.zeros(reo_dim.shape)
     veo_nondim = np.zeros(veo_dim.shape)
-    reo_nondim[:] = reo_dim[:]/(1000*normalization_quantities["dist2km"]) # Conversion to non-dimensional units in the ECI frame
-    veo_nondim[:] = veo_dim[:]/(1000*normalization_quantities["vel2kms"])
+    reo_nondim[:] = reo_dim[:]/(1000*norm_quantities["dist2km"]) # Conversion to non-dimensional units in the ECI frame
+    veo_nondim[:] = veo_dim[:]/(1000*norm_quantities["vel2kms"])
     
     
     num_particles = X_bt.shape[0]
@@ -243,12 +243,12 @@ def Synodic2Topo(X_bt, t_stamp, obs_lat, obs_lon, obs_el, normalization_quantiti
     return X_ot
 '''
 
-def Synodic2Topo(X_bt, t_stamp, obs_lat, obs_lon, obs_el, normalization_quantities):
+def Synodic2Topo(X_bt, t_stamp, obs_lat, obs_lon, obs_el, norm_quantities):
     # Insert code for obtaining vector between center of Earth and observer
-    rbe = np.array([-normalization_quantities["mu"], 0, 0]) # Position vector relating center of earth to barycenter
+    rbe = np.array([-norm_quantities["mu"], 0, 0]) # Position vector relating center of earth to barycenter
 
     UTC_vec_orig = dt.datetime(2024, 5, 3, 2, 41, 15, tzinfo=dt.timezone.utc) # Initial UTC vector at t_stamp = 0
-    t_add_dim = t_stamp * normalization_quantities["time2hr"]/24 # Convert the time to add to a dimensional quantity
+    t_add_dim = t_stamp * norm_quantities["time2hr"]/24 # Convert the time to add to a dimensional quantity
     UTC_vec = UTC_vec_orig + dt.timedelta(t_add_dim) # You will need this for calculating r_{eo} and v_{eo}
 
     delt_add_dim = t_add_dim - 1/86400
@@ -265,8 +265,8 @@ def Synodic2Topo(X_bt, t_stamp, obs_lat, obs_lon, obs_el, normalization_quantiti
 
     reo_nondim = np.zeros(reo_dim.shape)
     veo_nondim = np.zeros(veo_dim.shape)
-    reo_nondim[:] = reo_dim[:]/(1000*normalization_quantities["dist2km"]) # Conversion to non-dimensional units in the ECI frame
-    veo_nondim[:] = veo_dim[:]/(1000*normalization_quantities["vel2kms"])
+    reo_nondim[:] = reo_dim[:]/(1000*norm_quantities["dist2km"]) # Conversion to non-dimensional units in the ECI frame
+    veo_nondim[:] = veo_dim[:]/(1000*norm_quantities["vel2kms"])
     
     X_ot = np.zeros(X_bt.shape)
     
@@ -306,12 +306,12 @@ def Synodic2Topo(X_bt, t_stamp, obs_lat, obs_lon, obs_el, normalization_quantiti
     return X_ot
 
 
-def Synodic2ECI(X_bt, t_stamp, obs_lat, obs_lon, obs_el, normalization_quantities):
+def Synodic2ECI(X_bt, t_stamp, obs_lat, obs_lon, obs_el, norm_quantities):
     # Insert code for obtaining vector between center of Earth and observer
-    rbe = np.array([-normalization_quantities["mu"], 0, 0]) # Position vector relating center of earth to barycenter
+    rbe = np.array([-norm_quantities["mu"], 0, 0]) # Position vector relating center of earth to barycenter
 
     UTC_vec_orig = dt.datetime(2024, 5, 3, 2, 41, 15, tzinfo=dt.timezone.utc) # Initial UTC vector at t_stamp = 0
-    t_add_dim = t_stamp * normalization_quantities["time2hr"]/24 # Convert the time to add to a dimensional quantity
+    t_add_dim = t_stamp * norm_quantities["time2hr"]/24 # Convert the time to add to a dimensional quantity
     UTC_vec = UTC_vec_orig + dt.timedelta(t_add_dim) # You will need this for calculating r_{eo} and v_{eo}
 
     delt_add_dim = t_add_dim - 1/86400
@@ -328,8 +328,8 @@ def Synodic2ECI(X_bt, t_stamp, obs_lat, obs_lon, obs_el, normalization_quantitie
 
     reo_nondim = np.zeros(reo_dim.shape)
     veo_nondim = np.zeros(veo_dim.shape)
-    reo_nondim[:] = reo_dim[:]/(1000*normalization_quantities["dist2km"]) # Conversion to non-dimensional units in the ECI frame
-    veo_nondim[:] = veo_dim[:]/(1000*normalization_quantities["vel2kms"])
+    reo_nondim[:] = reo_dim[:]/(1000*norm_quantities["dist2km"]) # Conversion to non-dimensional units in the ECI frame
+    veo_nondim[:] = veo_dim[:]/(1000*norm_quantities["vel2kms"])
     
     X_ECI = np.zeros(X_bt.shape)
     

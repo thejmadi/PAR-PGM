@@ -10,27 +10,27 @@ import json
 import numpy as np
 import PlottingFunctions as plot
 
-folder_loc = Path("D:/PythonProjects/EDP/PGM/ParticleFusionTest/12_15_25_meeting/Matlab2Python/Test12/")
-base_name = "pyMC2"
+folder_loc = Path("D:/PythonProjects/EDP/PGM/ParticleFusionTest/12_15_25_meeting/Matlab2Python/Test18/")
+base_name = "pyMC"
 file_name = "metrics.npz"
-linestyle = [["-", "--", "--", "--", "--"], ["-"]]
+#linestyle = [["-", "--", "--", "--", "--"], ["-"]]
 loaded = {}
-normalization_quantities = {}
+norm_quantities = {}
 for folder in folder_loc.glob(f"{base_name}_*"):
     if folder.is_dir():
         metrics_path = folder / file_name
-        nq_path = folder / "normalization_quantities.npz"
+        nq_path = folder / "norm_quantities.npz"
         if metrics_path.exists():
             with np.load(metrics_path) as data:
                 loaded[folder.name] = dict(data)
             x = np.load(folder / "timesteps.npy")
             with np.load(nq_path) as data:
-                normalization_quantities[folder.name] = dict(data)
+                norm_quantities[folder.name] = dict(data)
             with open(folder / "cloud_names.json") as f:
                 cloud_names = json.load(f)
-            #with open(folder / "linestyle.json") as f:
-            #    linestyle = json.load(f)
-cloud_names[-1][0] = "Original Obs: 1 IOD: 40 hrs"
+            with open(folder / "linestyle.json") as f:
+                linestyle = json.load(f)
+#cloud_names[-1][0] = "Original Obs: 1 IOD: 40 hrs"
 reshaped_loaded = {}
 rearrange_list = ["likelihood_state_weighted", 
                   "likelihood_state_best", 
@@ -77,7 +77,7 @@ for metric in metric_names:
 
 print()
 
-save_loc = folder_loc/"MC_Results2"
+save_loc = folder_loc/"MC_Results"
 
 
 plot.plotMetrics(x, averaged_metrics["likelihood_state_weighted"], name, ls, save_loc, 0, "Log-Likelihood", f"GMM: Full, State Space, Log-Likelihood  vs. Time", "likelihood_state_weighted.png")
@@ -102,7 +102,7 @@ plot.plotMetrics(x, averaged_metrics["num_particles"], name, ls, save_loc, 0, "N
 
 #plot.plotMetrics(x, averaged_metrics["ill_conditioned"], name, save_loc, 0, "Number of Particles", f"Number of Particles  vs. Time", "num_particles.png")
 # TODO: Fix next plot
-#plot.plotMetricsPerState(x, averaged_metrics["RMSE"], normalization_quantities, name, ls, save_loc, 0, "RMSE (km, kms)", "RMSE Slice vs. Time", "RMSE")
+#plot.plotMetricsPerState(x, averaged_metrics["RMSE"], norm_quantities, name, ls, save_loc, 0, "RMSE (km, kms)", "RMSE Slice vs. Time", "RMSE")
 
 
 
@@ -117,7 +117,7 @@ plot.plotMetrics(x, averaged_metrics["KL"][1:, :, 0], name, ls, save_loc, 0, "KL
 plot.plotMetrics(x, averaged_metrics["KL"][1:, :, 1], name, ls, save_loc, 0, "KL", f"Ob {0} to Ob KL Divergence vs. Time", "KL2.png")
 plot.plotMetrics(x, averaged_metrics["KL"][1:, :, 2], name, ls, save_loc, 0, "KL", f"Ob {0} to Ob Avg KL Divergence vs. Time", "KL.png")
 plot.plotMetrics(x, averaged_metrics["JS"][1:], name, ls, save_loc, 0, "JS", f"Ob {0} to Ob Jensen-Shannon Divergence vs. Time", "JS.png")
-#plot.plotMetricsPerState(x, averaged_metrics["JS_marginal"][0, 1:, :, :], normalization_quantities, names, ls, save_loc, 0, "JS Slice", "JS Slice vs. Time", "JSSLice")
+#plot.plotMetricsPerState(x, averaged_metrics["JS_marginal"][0, 1:, :, :], norm_quantities, names, ls, save_loc, 0, "JS Slice", "JS Slice vs. Time", "JSSLice")
 
 
 
