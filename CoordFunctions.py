@@ -9,6 +9,15 @@ from numpy import linalg as la
 import datetime as dt
 import pymap3d
 
+# Convert synodic cloud to synodic in canonical coords
+def Synodic2Canon(X_syn):
+    X_canon = np.hstack((X_syn[:, :3],
+                         (X_syn[:, 3] - X_syn[:, 1])[:, np.newaxis],
+                         (X_syn[:, 4] + X_syn[:, 0])[:, np.newaxis],
+                         X_syn[:, 5][:, np.newaxis]))
+    return X_canon
+
+
 # Used to get the location of the Earth-Observer vector at a certain time (t_stamp)
 def getObserverPos(t_stamp, obs_lat, obs_lon, obs_el, norm_quantities):
     # Insert code for obtaining vector between center of Earth and observer

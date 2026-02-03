@@ -436,41 +436,7 @@ def getCloudMetrics(obs_list, t_int, cloud_is_active, norm_quantities, rng, ts, 
         KL_Q_M = np.mean(gmQ.score_samples(XQ) - log_m(gmP.score_samples(XQ), gmQ.score_samples(XQ)))
         
         return 0.5 * (KL_P_M + KL_Q_M) / np.log(2)
-    '''
-    norm_data = sci.io.loadmat(save_loc2/f"norm_gmm_params_{ts}.mat")
-    norm_weights = norm_data["norm_weights"].ravel()        # (K,)
-    norm_means   = norm_data["norm_means"]                  # (K, D)
-    norm_covs    = norm_data["norm_covs"]                   # (D, D, K)
-    norm_covs = np.transpose(norm_covs, (2, 0, 1))
     
-    unnorm_data = sci.io.loadmat(save_loc2/f"unnorm_gmm_params_{ts}.mat")
-    unnorm_weights = unnorm_data["unnorm_weights"].ravel()        # (K,)
-    unnorm_means   = unnorm_data["unnorm_means"]                  # (K, D)
-    unnorm_covs    = unnorm_data["unnorm_covs"]                   # (D, D, K)
-    unnorm_covs = np.transpose(unnorm_covs, (2, 0, 1))
-    
-    K, D = norm_means.shape
-    
-    norm_gmm_mat = GaussianMixture(
-        n_components=K,
-        covariance_type="full")
-    # Manually set parameters
-    norm_gmm_mat.weights_ = norm_weights
-    norm_gmm_mat.means_ = norm_means
-    norm_gmm_mat.covariances_ = norm_covs
-    # sklearn requires precisions too
-    norm_gmm_mat.precisions_cholesky_ = np.linalg.cholesky(np.linalg.inv(norm_covs))
-    
-    unnorm_gmm_mat = GaussianMixture(
-        n_components=K,
-        covariance_type="full")
-    # Manually set parameters
-    unnorm_gmm_mat.weights_ = unnorm_weights
-    unnorm_gmm_mat.means_ = unnorm_means
-    unnorm_gmm_mat.covariances_ = unnorm_covs
-    # sklearn requires precisions too
-    unnorm_gmm_mat.precisions_cholesky_ = np.linalg.cholesky(np.linalg.inv(unnorm_covs))
-    '''
     # TODO: Rename total_num_clouds to max_num_clouds everywhere
     gmm_unnormalized = [None]*cloud_is_active.shape[0]
     
@@ -483,51 +449,44 @@ def getCloudMetrics(obs_list, t_int, cloud_is_active, norm_quantities, rng, ts, 
     best_truth_loglikelihood = np.full(cloud_is_active.shape, np.nan)
     best_entropy = np.full(cloud_is_active.shape, np.nan)
 
+    # "if h is None" indicates conditional to check whether cloud is state space or msmt space
     for ob in np.where(cloud_is_active[:, 0])[0]:
         if h is None:
-            metric_truth = cf.Topo2Synodic(np.copy(obs_list[ob][0].topo_truth), t_int, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
+            metric_truth_temp = cf.Topo2Synodic(np.copy(obs_list[ob][0].topo_truth), t_int, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
+            metric_truth = cf.Synodic2Canon(np.copy(metric_truth_temp))
         else:
             metric_truth = h(np.copy(obs_list[ob][0].topo_truth))
         for cloud in np.where(cloud_is_active[ob])[0]:
             if h is None:
-                metric_cloud = cf.Topo2Synodic(np.copy(obs_list[ob][cloud].topo_cloud_post), t_int, obs_list[ob][cloud].lat, obs_list[ob][cloud].lon, obs_list[ob][cloud].el, norm_quantities)
+                metric_cloud_temp = cf.Topo2Synodic(np.copy(obs_list[ob][cloud].topo_cloud_post), t_int, obs_list[ob][cloud].lat, obs_list[ob][cloud].lon, obs_list[ob][cloud].el, norm_quantities)
+                metric_cloud = cf.Synodic2Canon(np.copy(metric_cloud_temp))
             else:
                 metric_cloud = h(np.copy(obs_list[ob][cloud].topo_cloud_post))
+            
             # Create unnormalized gmm for analysis
             X_norm, mu, std = standardize(metric_cloud)
             gmm_normalized, AIC[ob, cloud], K[ob, cloud] = fitGMM(np.copy(X_norm), rng)
             gmm_unnormalized_temp = unstandardize(gmm_normalized, mu, std)
             if cloud == 0:
                 gmm_unnormalized[ob] = gmm_unnormalized_temp
-            # Calculate various metrics of GMM
-            # Complete GMM metrics
-            # Log-Likelihoood
+            
+            # Calc GMM metrics
             gmm_truth_loglikelihood[ob, cloud] = gmm_unnormalized_temp.score_samples(metric_truth)[0]
             # Entropy
             gmm_entropy[ob, cloud] = -gmm_unnormalized_temp.score(metric_cloud)
-            #gmm_entropy = -np.mean(gmm_particles_loglikelihood)
             # Standard Deviations
             # RMSE
             if h is None:
                 gmm_RMSE[ob, cloud, :] = np.sqrt(np.mean((metric_cloud - metric_truth)**2, axis=0))
             
-            # Best mode metrics
-            # TODO: Best mode metrics may be incorrect
-            #candidate_likelihoods = gmm_unnormalized.predict_proba(X_truth) # Gives relative likelihoods, if uniform, all modes describe truth equally well/badly
-            #best_k = np.argmax(candidate_likelihoods)
-            #best_samples = rng.multivariate_normal(gmm_unnormalized.means_[best_k], gmm_unnormalized.covariances_[best_k], size=100_000)
-            # Log-Likelihood
-            best_truth_loglikelihood = 0#np.log(np.max(candidate_likelihoods))
-            #best_particles_loglikelihood = sci.stats.multivariate_normal.logpdf(best_samples, mean=gmm_unnormalized.means_[best_k], cov=gmm_unnormalized.covariances_[best_k], allow_singular=True)
-            #best_particles_loglikelihood = _estimate_log_gaussian_prob(best_samples, gmm_unnormalized.means_[best_k:best_k+1], gmm_unnormalized.precisions_cholesky_[best_k:best_k+1], gmm_unnormalized.covariance_type).ravel()
-            # Entropy
-            best_entropy = 0#np.mean(best_particles_loglikelihood)
-            # Consistency
-            # Standard Deviation
-            # RMSE
-            #best_RMSE = np.sqrt(np.mean((best_samples - X_truth)**2, axis=0))
+            # Calc best mode metrics
+            # TODO: Fix best mode metrics
+            best_truth_loglikelihood = 0
+            best_entropy = 0
+            
+            # Calc misc metrics
             num_particles[ob, cloud] = metric_cloud.shape[0]
-    #K = K.astype(int)
+
     if h is None:
         valid_rows = np.where(cloud_is_active[:, 0])[0]
         avg_ob_ob_likeli = np.full((cloud_is_active.shape[0], cloud_is_active.shape[0]), np.nan)
@@ -537,12 +496,12 @@ def getCloudMetrics(obs_list, t_int, cloud_is_active, norm_quantities, rng, ts, 
         JS = np.full((cloud_is_active.shape[0], cloud_is_active.shape[0]), np.nan)
         JS_marginal = np.full((cloud_is_active.shape[0], cloud_is_active.shape[0], 6), np.nan)
         ill_conditioned = np.full((cloud_is_active.shape[0], cloud_is_active.shape[0]), False)
-        # TODO: Check next line
-        #for idx, ob_1 in enumerate(valid_rows[0]):
         for ob_1 in range(1):
-            X_cloud_1 = cf.Topo2Synodic(np.copy(obs_list[ob_1][0].topo_cloud_post), t_int, obs_list[ob_1][0].lat, obs_list[ob_1][0].lon, obs_list[ob_1][0].el, norm_quantities)
+            X_cloud_1_temp = cf.Topo2Synodic(np.copy(obs_list[ob_1][0].topo_cloud_post), t_int, obs_list[ob_1][0].lat, obs_list[ob_1][0].lon, obs_list[ob_1][0].el, norm_quantities)
+            X_cloud_1 = cf.Synodic2Canon(np.copy(X_cloud_1_temp))
             for ob_2 in valid_rows[0 + 1:]:
-                X_cloud_2 = cf.Topo2Synodic(np.copy(obs_list[ob_2][0].topo_cloud_post), t_int, obs_list[ob_2][0].lat, obs_list[ob_2][0].lon, obs_list[ob_2][0].el, norm_quantities)
+                X_cloud_2_temp = cf.Topo2Synodic(np.copy(obs_list[ob_2][0].topo_cloud_post), t_int, obs_list[ob_2][0].lat, obs_list[ob_2][0].lon, obs_list[ob_2][0].el, norm_quantities)
+                X_cloud_2 = cf.Synodic2Canon(np.copy(X_cloud_2_temp))
                 # Compute Ob-Ob metrics for only the original clouds of each observer
                 K_1 = int(K[ob_1, 0])
                 K_2 = int(K[ob_2, 0])
@@ -551,9 +510,7 @@ def getCloudMetrics(obs_list, t_int, cloud_is_active, norm_quantities, rng, ts, 
                     for k2 in range(K_2):
                         cov = gmm_unnormalized[ob_1].covariances_[k1] + gmm_unnormalized[ob_2].covariances_[k2]
                         eps = max(1e-6 - la.eigvalsh(cov).min(), 0)
-                        #gmm_unnormalized[ob_1].covariances_[k1] += np.eye(6)*eps
-                        #gmm_unnormalized[ob_2].covariances_[k2] += np.eye(6)*eps
-                        #cov = gmm_unnormalized[ob_1].covariances_[k1] + gmm_unnormalized[ob_2].covariances_[k2]
+                        # Sometimes covariance matrics are ill-conditioned
                         try:
                             ob_ob_likeli[k1, k2] = sci.stats.multivariate_normal.logpdf(gmm_unnormalized[ob_2].means_[k2], 
                                                                                      mean=gmm_unnormalized[ob_1].means_[k1], 
@@ -587,6 +544,7 @@ def fusionMethods(cloud_1, cloud_2, fusion_type, K, rng):
         fused_cloud_1 = weightUpdateAlgorithm(cloud_1, cloud_2, K, rng)
         #fused_cloud_2 = weightUpdateAlgorithm(cloud_2, cloud_1, K, rng)
         fused_cloud_2 = None
+    
     # Resample, probably unnecessary but doesn't hurt
     _, fused_cloud_means_1, fused_cloud_covs_1, fused_cloud_weights_1, K_1 = cluster(fused_cloud_1, K, rng, None, None)
     fused_cloud_1, _ = drawFrom2(fused_cloud_weights_1, fused_cloud_means_1, fused_cloud_covs_1, cloud_1.shape[0], rng)
@@ -663,11 +621,6 @@ def weightUpdateAlgorithm(cloud_1, cloud_2, K, rng):
 
 def enforceCislunarBounds(X_cloud, time, lat, lon, el, norm_quantities, low_lim, up_lim, vel_lim):
     observer_pos = cf.getObserverPos(time, lat, lon, el, norm_quantities)
-    
-    #for i in range(len(X_cloud[:,0])):
-    #    if(np.linalg.norm(X_cloud[i,:3] + obs_pos) > low_lim and np.linalg.norm(X_cloud[i,:3] + obs_pos) <= up_lim):
-    #            j = j + 1
-    #            Xm_cloud_tmp[j-1,:] = np.copy(X_cloud[i,:])
     obj_dist = np.linalg.norm(X_cloud[:, :3] + observer_pos, axis=1)*norm_quantities["dist2km"]
     obj_vel = np.linalg.norm(X_cloud[:, 3:], axis=1)*norm_quantities["vel2kms"]
     pruned_cloud = X_cloud[(low_lim < obj_dist) & (obj_dist < up_lim) & (obj_vel <= vel_lim), :]
@@ -681,43 +634,39 @@ def main(MC_idx):
     save_loc = Path(f"D:/PythonProjects/EDP/PGM/ParticleFusionTest/12_15_25_meeting/Matlab2Python/Test21/pyMC_{base_or_exp}_{MC_idx}")
     load_loc = Path(f"D:/PythonProjects/EDP/PGM/ParticleFusionTest/12_15_25_meeting/Matlab2Python/Test21/OrbitData{base_or_exp}/Agent")
     #load_loc2 = Path("D:/PythonProjects/EDP/PGM/ParticleFusionTest/12_15_25_meeting/Matlab2Python/Test13")
-    dynamics = "CR3BP";
-    if (dynamics == "CR3BP"):
-        dist2km = 384400 # Kilometers per non-dimensionalized distance
-        time2hr = 4.342*24 # Hours per non-dimensionalized time
-        vel2kms = dist2km/(time2hr*60*60) # Kms per non-dimensionalized velocity
-        norm_quantities = {"dist2km": dist2km,
-                                    "vel2kms": vel2kms,
-                                    "time2hr": time2hr,
-                                    "mu": 1.2150582e-2}
-        #dynamics_model = @(t, x) Dynamics.cr3bp_dyn(t, x, norm_quantities.mu);
     
-    cluster_by = "FullState"
-    Kn = 14 # Number of clusters (original)
-    K = np.tile(Kn, (6, 6)) # Number of clusters (changeable)
+    # Nondimensionalizations
+    dist2km = 384400 # Kilometers per non-dimensionalized distance
+    time2hr = 4.342*24 # Hours per non-dimensionalized time
+    vel2kms = dist2km/(time2hr*60*60) # Kms per non-dimensionalized velocity
+    norm_quantities = {"dist2km": dist2km,
+                        "vel2kms": vel2kms,
+                        "time2hr": time2hr,
+                        "mu": 1.2150582e-2}
+    
+    #Kn = 14 # Number of clusters (original)
+    #K = np.tile(Kn, (6, 6)) # Number of clusters (changeable)
     Kmax = 14 # Maximum number of clusters (Kmax = 1 for EnKF)
 
     plot_IOD = False
     plot_indv_clouds = [False, False] # Not recommended unless debugging
     plot_cross_observers = True # Recommended to see observers' original clouds plotted on same figure
     
-    #num_IOD_particles = 1000
     total_num_agents = 2 # Expected number of agents
-    num_active_obs = 0
-    Lp = np.array([[10000], [10000]], dtype=int)
-    num_msmt_for_IOD = np.array([[10], [10]], dtype=int)
-    ts_to_perform_IOD = np.array([[0], [20]], dtype=int)
+    num_active_agents = 0 # Current number of active agents
+    num_new_clouds_per_agent = 1 # How many clouds to append to each observer per row in fusion_information
+    Lp = np.array([[1000], [1000]], dtype=int) # Number of particles/agent
+    order_of_fit = 4 # Order of poly fit for IOD
+    num_msmt_for_IOD = np.array([[10], [10]], dtype=int) # Number of msmts required before IOD is performed
+    ts_to_perform_IOD = np.array([[0], [20]], dtype=int) # Timestep to start checking whether IOD is possible
     plot_combined_clouds = np.array([[True], [False]], dtype=bool) # Plot all clouds of single observer on same figure. Recommended for observer 1
     num_clouds_per_agent = np.ones(total_num_agents, dtype=int)
-    
-    #partial_tsa = [sio.loadmat(f"{load_loc}{i+1}a/partial_ts.mat")["partial_ts"] for i in range(total_num_agents)]
-    #full_tsa = [sio.loadmat(f"{load_loc}{i+1}a/full_ts.mat")["full_ts"] for i in range(total_num_agents)]
-    #full_vtsa = [sio.loadmat(f"{load_loc}{i+1}a/full_vts.mat")["full_vts"] for i in range(total_num_agents)]
-    
-    
+        
+    # Read in OrbitDataBuilder data
     partial_ts = [np.load(f"{load_loc}{i+1}/partial_ts.npy") for i in range(total_num_agents)] #[sio.loadmat(f"{load_loc}{i+1}/partial_ts.mat")["partial_ts"] for i in range(total_num_agents)]
     full_ts = [np.load(f"{load_loc}{i+1}/full_ts.npy") for i in range(total_num_agents)] #[sio.loadmat(f"{load_loc}{i+1}/full_ts.mat")["full_ts"] for i in range(total_num_agents)]
     full_vts = [np.load(f"{load_loc}{i+1}/full_vts.npy") for i in range(total_num_agents)] #[sio.loadmat(f"{load_loc}{i+1}/full_vts.mat")["full_vts"] for i in range(total_num_agents)]
+    
     combined_msmt_data, combined_state_data, all_timesteps = combineMsmts(full_ts, full_vts, partial_ts)
     num_timesteps = all_timesteps.shape[0]
     
@@ -727,16 +676,18 @@ def main(MC_idx):
                           [0, 1, False, 35, "Weight Update Algorithm", 14],
                           [0, 1, False, 40, "Weight Update Algorithm", 14],
                           [0, 1, False, 45, "Weight Update Algorithm", 14]]#[[0, 1, False, 45], [0, 1, False, 55], [0, 1, False, 65], [0, 1, False, 75]] 
-    #cloud_names = [[f"Original Obs: {ob}. IOD: {all_timesteps[ts_to_perform_IOD[ob]][0]*norm_quantities['time2hr']:.0f} hrs"] for ob in range(total_num_agents-1)]
-    #cloud_names.append(["Baseline Obs"])
-    #linestyle = [["-"] for ob in range(total_num_agents)]
-    fusion_types = ["Original", "Weight Update"]
-    num_new_clouds_per_agent = 1
+    
 
     # College Station
+    #obs_lat = [30.618963, -34.5, -40, 30.618963]
+    #obs_lon = [-96.339214, -58, 175, -96.339214]
+    #obs_el = [103.8, 103.8, 103.8, 103.8]
+
     obs_lat = [30.618963, 30.618963, 30.618963]
     obs_lon = [-96.339214, -96.339214, -96.339214]
     obs_el = [103.8, 103.8, 103.8]
+    
+    # Check/create output folders
     for ob in range(total_num_agents):
         ensureDirExists(save_loc / f"Observer{ob}" / "Topo" / "Combined")
         ensureDirExists(save_loc / f"Observer{ob}" / "Synodic" / "Combined")
@@ -744,13 +695,16 @@ def main(MC_idx):
     ensureDirExists(save_loc / "CrossOb" / "Synodic")
     #ensureDirExists(save_loc / "CrossOb" / "ECI")
     
+    # Msmt equation
     h = lambda x: np.array([np.arctan2(x[:, 1],x[:, 0]),
                             np.pi/2 - np.arccos(x[:, 2]/la.norm(x[:, :3], axis=1))]).T
     
+    # Msmt uncertainties
     theta_f = 1.5 # Arc-seconds of error covariance
     range_f = np.tile(0.25, (6))
     R_weight = np.array([[theta_f*np.pi/648000, 0], [0, theta_f*np.pi/648000]])**2
     
+    # Build list of agents' clouds
     if base_or_exp == "Exp":
         obs_list = [[oc.Observer(name = f"Original Obs: {ob}. IOD: {all_timesteps[ts_to_perform_IOD[ob]][0]*norm_quantities['time2hr']:.0f} hrs",
                                  is_orig_obs = True,
@@ -774,12 +728,13 @@ def main(MC_idx):
                                  plot_indv_clouds = plot_indv_clouds[-1],
                                  plot_combined_clouds = plot_combined_clouds[-1])]]
     
+    # Cislunar bounds
     enforce_bounds = True
     low_lim = 2*42164 # Two times the GEO Distance
     up_lim = 550000
     vel_lim = 42 # Escape velocity of the solar system
     
-    
+    # Dictionary of metrics (Not all are currently calculated)
     total_num_clouds = 1 + num_new_clouds_per_agent * sum(row[2] for row in fusion_information)
     metrics = {"likelihood_state_weighted": (total_num_agents, total_num_clouds, num_timesteps),
                "likelihood_state_best": (total_num_agents, total_num_clouds, num_timesteps),
@@ -790,16 +745,11 @@ def main(MC_idx):
                "entropy_msmt_weighted": (total_num_agents, total_num_clouds, num_timesteps),
                "entropy_msmt_best": (total_num_agents, total_num_clouds, num_timesteps),
                "NEES": (total_num_agents, total_num_clouds, num_timesteps),
-               #"MC_std_dev": (total_num_clouds, 1),
                "MC_consistency": (total_num_agents, total_num_clouds, num_timesteps),
                "num_cluster": (total_num_agents, total_num_clouds, num_timesteps),
                "num_particles": (total_num_agents, total_num_clouds, num_timesteps),
-               #"ent1": (total_num_clouds, 6),
                "RMSE": (total_num_agents, total_num_clouds, num_timesteps, 6),
                "std_dev": (total_num_agents, total_num_clouds, num_timesteps, 6),
-               #"mat_weight_metric": (total_num_clouds, 3),
-               #"orig_weight_metric": (total_num_clouds, 3),
-               #"cross_observer_norm": (1, 1),
                "AIC_state": (total_num_agents, total_num_clouds, num_timesteps), 
                "AIC_msmt": (total_num_agents, total_num_clouds, num_timesteps),
                "avg_ob_ob_likeli": (total_num_agents, total_num_agents, num_timesteps),
@@ -812,8 +762,9 @@ def main(MC_idx):
     
     metrics = {key: np.full(shape, np.nan) for key, shape in metrics.items()}
 
+    # Bool mask to indicate which clouds are active
     cloud_is_active = np.full((total_num_agents, total_num_clouds), False)
-    # TODO: Check if should be -1
+    
     for ts in range(num_timesteps-1):
         t_prev = all_timesteps[ts]
         #%% IOD
@@ -821,11 +772,9 @@ def main(MC_idx):
             num_msmts_check = sum(combined_msmt_data[ts_to_perform_IOD[ob, 0]:ts+1, 1, ob]) >= num_msmt_for_IOD[ob, 0]
             if is_inactive and num_msmts_check:
                 #print(f"Performing IOD on object: {ob}")
-                order_of_fit = 4
                 num_IOD_particles = Lp[ob, 0]
                 X0_cloud_temp = np.zeros((num_IOD_particles, 6));
                 
-                starttime = timer.time()
                 for particle in range(num_IOD_particles):
                     X0_cloud_temp[particle, :] = stateEstCloud(num_msmt_for_IOD[ob, 0], 
                                                   ts, 
@@ -837,12 +786,8 @@ def main(MC_idx):
                                                   up_lim,
                                                   norm_quantities,
                                                   rng)
-                endtime = timer.time()
-                #print(endtime - starttime)
-                #X0_cloud_temp = sci.io.loadmat(load_loc2/"X0cloud_temp.mat")
-                #X0_cloud_temp = X0_cloud_temp['X0cloud_temp']
+                
                 if False:
-                    
                     X0_cloud = enforceCislunarBounds(X0_cloud_temp,
                                                     t_prev,
                                                     obs_list[ob][0].lat,
@@ -851,12 +796,10 @@ def main(MC_idx):
                                                     norm_quantities,
                                                     low_lim,
                                                     up_lim,
-                                                    vel_lim)
-                    
+                                                    vel_lim)    
                 else:
                     X0_cloud = X0_cloud_temp
-                # TODO: Remove most legends
-                # TODO: fix plots
+                
                 X0_truth = combined_state_data[ts, 1:, ob].reshape(1, -1);
                 
                 if plot_IOD:
@@ -878,14 +821,12 @@ def main(MC_idx):
                                         save_loc/f"Observer{ob}"/"Synodic"/"iodCloud.png")
                 
                 cloud_is_active[ob, 0] = True
-                num_active_obs = np.sum(cloud_is_active[:, 0])
+                num_active_agents = np.sum(cloud_is_active[:, 0])
                 obs_list[ob][0].topo_cloud_post = X0_cloud.copy()
                 obs_list[ob][0].topo_truth = X0_truth.copy()
-                #print(X0_truth[0, :3]*norm_quantities['dist2km'])
-                #print(obs_list[ob][0].topo_truth[0, :3]*norm_quantities['dist2km'])
                 
         #%% Fusion
-        if num_active_obs >= 2:
+        if num_active_agents >= 2:
             for row, (fuse_id_1, fuse_id_2, fuse, fusion_timestep, fusion_type, K_upper) in enumerate(fusion_information):
                 if cloud_is_active[fuse_id_1, 0] and cloud_is_active[fuse_id_2, 0] and fuse and fusion_timestep == ts:
                     cloud_to_fuse_1 = cf.Topo2Synodic(np.copy(obs_list[fuse_id_1][0].topo_cloud_post), t_prev, obs_list[fuse_id_1][0].lat, obs_list[fuse_id_1][0].lon, obs_list[fuse_id_1][0].el, norm_quantities)
@@ -968,23 +909,13 @@ def main(MC_idx):
         msmt_mask = combined_msmt_data[ts+1, 1, :]
         for ob in np.where(cloud_is_active[:, 0])[0]:
             for cloud in np.where(cloud_is_active[ob])[0]:
-                #cloud_for_matlab = np.copy(Xp_cloudp[ob, cloud])
-                #sci.io.savemat(load_loc2/f"cloud_for_matlab_{ts+1}.mat", {"Xp_cloudp_temp": cloud_for_matlab})
-                
                 Xm_cloud_temp = propagate(np.copy(obs_list[ob][cloud].topo_cloud_post), t_prev, interval, obs_list[ob][cloud].lat, obs_list[ob][cloud].lon, obs_list[ob][cloud].el, norm_quantities)
-                #Xm_cloud_temp = sci.io.loadmat(load_loc2/f"propagate{ts+1}.mat")
-                #Xm_cloud_temp = Xm_cloud_temp['Xm_cloud_tmp']
                 if enforce_bounds and msmt_mask[ob] and t_prior*norm_quantities["time2hr"] <= 150:
                     obs_list[ob][cloud].topo_cloud_prior = enforceCislunarBounds(Xm_cloud_temp, t_prior, obs_list[ob][cloud].lat, obs_list[ob][cloud].lon, obs_list[ob][cloud].el, norm_quantities, low_lim, up_lim, vel_lim)
                 else:
-                    # TODO: Check if Xm_cloud changes if temp gets changed/reset
                     obs_list[ob][cloud].topo_cloud_prior = np.copy(Xm_cloud_temp)
-                #print(obs_list[ob][cloud].n_particles("prior"))
-            #obs_list[ob][0].topo_truth = propagate(obs_list[ob][0].topo_truth, t_prev, interval, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
             obs_list[ob][0].topo_truth = combined_state_data[ts+1, 1:, ob].reshape(1, -1)#propagate(X_truth[ob], t_prev, interval, obs_lat[ob], obs_lon[ob], obs_el[ob], norm_quantities)
             
-        #print(f"Timestamp: {t_prior*norm_quantities['time2hr']:3.2f}")
-
         
         #%% Update Step
         msmt = np.full((total_num_agents, 2), np.nan)
@@ -1015,16 +946,11 @@ def main(MC_idx):
                 
                 # Resample
                 obs_list[ob][cloud].topo_cloud_post, cluster_post_idx[ob][cloud] = drawFrom2(cluster_post_weights_temp, cluster_post_means_temp, cluster_post_covs_temp, obs_list[ob][cloud].max_particles, rng)
-                #Xp_cloudp_temp = sci.io.loadmat(load_loc2/f"drawFrom{ts+2}.mat")
-                #Xp_cloudp[ob, cloud] = Xp_cloudp_temp['Xp_cloudp_temp']
-                #cluster_post_idx_temp = sci.io.loadmat(load_loc2/f"drawFromIdx{ts+2}.mat")
                 # Add 1 to each cluster idx (plotting purposes)
                 cluster_prior_idx[ob][cloud] += 1
                 cluster_post_idx[ob][cloud] += 1
             else:
                 # Resample
-                #cloud_for_matlab = np.copy(Xm_cloud[ob, cloud])
-                #sci.io.savemat(f"cloud_for_matlab_{ts+2}.mat", {"Xm_cloud_temp": cloud_for_matlab})
                 obs_list[ob][cloud].topo_cloud_post = np.copy(obs_list[ob][cloud].topo_cloud_prior)
                 cluster_post_idx[ob][cloud] = np.ones((obs_list[ob][cloud].n_particles("post")))
             
@@ -1069,7 +995,6 @@ def main(MC_idx):
                     active_clouds = np.where(cloud_is_active[ob])[0]
                     plotting_cloud = np.vstack([obs_list[ob][cloud].topo_cloud_prior for cloud in active_clouds])
                     plotting_truth = np.copy(obs_list[ob][0].topo_truth)
-                    # TODO: Next line won't work if diff num particles per cloud (already true)
                     plotting_idx = np.hstack([np.repeat(cloud+1, obs_list[ob][cloud].n_particles("prior")) for cloud in active_clouds]).T
                     cloud_names_temp = [obs_list[ob][cloud].name for cloud in active_clouds]
                     plot.plotStateSpace(plotting_cloud,
@@ -1107,16 +1032,15 @@ def main(MC_idx):
                                         cloud_names = cloud_names_temp)
         
         # Plot original clouds across all observers
-        if num_active_obs >= 2 and plot_cross_observers:
+        if num_active_agents >= 2 and plot_cross_observers:
             active_obs =  np.where(cloud_is_active[:, 0])[0]
             plotting_cloud = np.vstack([cf.Topo2Synodic(np.copy(obs_list[ob][0].topo_cloud_prior), t_prior, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities) for ob in active_obs]) #np.vstack(Xm_cloud[cloud_is_active[:, 0], 0])
             plotting_idx = np.hstack([np.repeat(ob+1, obs_list[ob][0].n_particles("prior")) for ob in active_obs]).T #np.repeat(np.asarray(np.where(cloud_is_active[:, 0]))+1, Lp[cloud_is_active[:, 0], 0])
-            #plotting_cloud = cf.Topo2Synodic(np.copy(obs_list[ob][0].topo_cloud_prior), t_prior, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
             plotting_truth = cf.Topo2Synodic(np.copy(obs_list[ob][0].topo_truth), t_prior, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
             cloud_names_temp = [obs_list[ob][0].name for ob in active_obs]
             plot.plotStateSpace(plotting_cloud,
                                 plotting_truth, 
-                                num_active_obs,
+                                num_active_agents,
                                 plotting_idx, 
                                 norm_quantities, 
                                 f"Timestep: {t_prior*norm_quantities['time2hr']:3.2f} Hours (Prior)",
@@ -1203,16 +1127,15 @@ def main(MC_idx):
                                     cloud_names = cloud_names_temp)
         
         # Plot original clouds across all observers
-        if num_active_obs >= 2 and plot_cross_observers and np.any(msmt_mask == True):
+        if num_active_agents >= 2 and plot_cross_observers and np.any(msmt_mask == True):
             active_obs =  np.where(cloud_is_active[:, 0])[0]
             plotting_cloud = np.vstack([cf.Topo2Synodic(np.copy(obs_list[ob][0].topo_cloud_post), t_prior, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities) for ob in active_obs]) #np.vstack(Xp_cloudp[cloud_is_active[:, 0], 0])
             plotting_idx = np.hstack([np.repeat(ob+1, obs_list[ob][0].n_particles("post")) for ob in active_obs]).T #np.repeat(np.asarray(np.where(cloud_is_active[:, 0]))+1, Lp[cloud_is_active[:, 0], 0])
-            #plotting_cloud = cf.Topo2Synodic(np.copy(obs_list[ob][0].topo_cloud_post), t_prior, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
             plotting_truth = cf.Topo2Synodic(np.copy(obs_list[ob][0].topo_truth), t_prior, obs_list[ob][0].lat, obs_list[ob][0].lon, obs_list[ob][0].el, norm_quantities)
             cloud_names_temp = [obs_list[ob][0].name for ob in active_obs]
             plot.plotStateSpace(plotting_cloud,
                                 plotting_truth, 
-                                num_active_obs,
+                                num_active_agents,
                                 plotting_idx, 
                                 norm_quantities, 
                                 f"Timestep: {t_prior*norm_quantities['time2hr']:3.2f} Hours (Post)",
@@ -1224,7 +1147,6 @@ def main(MC_idx):
     #%% Plot and save metrics
     x = all_timesteps*norm_quantities['time2hr']
     active_obs, active_clouds =  np.where(cloud_is_active)
-    #active_clouds =  np.where(cloud_is_active[active_obs, :])[0]
     
     np.savez(save_loc / "metrics.npz", **metrics)
     np.savez(save_loc / "norm_quantities.npz", **norm_quantities)
